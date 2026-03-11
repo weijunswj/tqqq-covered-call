@@ -1,0 +1,10 @@
+# Secrets — never commit
+.env
+
+# Runtime state — local only
+state.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
