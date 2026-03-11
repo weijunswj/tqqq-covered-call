@@ -78,6 +78,7 @@ def load_state() -> dict:
         "days_paused":      0,
         "resume_cond":      None,
         "total_days_paused": 0,
+        "last_run_date":    None,
     }
 
 
@@ -90,10 +91,12 @@ def update_state(action: str, pause_until: str | None, tqqq: dict, vix: float | 
     Update pause state based on today's action.
     Returns ( state, status_change_msg ).
     status_change_msg is non-empty only on state transitions ( paused ↔ resumed ).
+    Same-day guard: if already ran today, skip counter increments to prevent double-counting.
     """
     state      = load_state()
     today_str  = str(datetime.now(ET).date())
     change_msg = ""
+    already_ran_today = state.get("last_run_date") == today_str
 
     is_pause  = any(x in action for x in ["⏸️ PAUSE", "⏸️ SKIP", "🛑 CLOSE", "🛑 SKIP", "🏖️ MARKET", "⚠️ CAUTION"])
     is_proceed = "✅ PROCEED" in action
@@ -107,11 +110,13 @@ def update_state(action: str, pause_until: str | None, tqqq: dict, vix: float | 
                 "days_paused": 1,
                 "resume_cond": pause_until or "Check conditions manually.",
             })
-            state["total_days_paused"] = state.get("total_days_paused", 0) + 1
+            if not already_ran_today:
+                state["total_days_paused"] = state.get("total_days_paused", 0) + 1
             change_msg = f"⏸️ PAUSE STARTED today. Reason: {action}"
         else:
-            state["days_paused"]       = state.get("days_paused", 1) + 1
-            state["total_days_paused"] = state.get("total_days_paused", 0) + 1
+            if not already_ran_today:
+                state["days_paused"]       = state.get("days_paused", 1) + 1
+                state["total_days_paused"] = state.get("total_days_paused", 0) + 1
             state["reason"]            = action
             state["resume_cond"]       = pause_until or state.get("resume_cond", "")
 
@@ -129,6 +134,7 @@ def update_state(action: str, pause_until: str | None, tqqq: dict, vix: float | 
             "resume_cond": None,
         })
 
+    state["last_run_date"] = today_str
     save_state(state)
     return state, change_msg
 
