@@ -28,8 +28,9 @@ load_dotenv(Path(__file__).parent / ".env")
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT  = os.getenv("TELEGRAM_CHAT")
+DRY_RUN        = os.getenv("DRY_RUN", "").lower() in {"1", "true", "yes", "on"}
 
-if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
+if not DRY_RUN and (not TELEGRAM_TOKEN or not TELEGRAM_CHAT):
     print("ERROR: TELEGRAM_TOKEN and TELEGRAM_CHAT must be set in .env", file=sys.stderr)
     sys.exit(1)
 
@@ -496,7 +497,9 @@ def build_message(
     real_flags = [f for f in flags if "clear" not in f.lower()]
     flags_text = ("\n".join(f"  {f}" for f in real_flags) + "\n") if real_flags else ""
     pause_text = (f"  RESUME: {pause_until}\n") if pause_until else ""
-    reasons_block = f"WHY\n{flags_text}{pause_text}\n" if real_flags else ""
+    # Keep WHY/RESUME visually separated for readability in Telegram.
+    pause_gap = "\n" if (flags_text and pause_text) else ""
+    reasons_block = f"*WHY*\n{flags_text}{pause_gap}{pause_text}\n" if real_flags else ""
 
     # Pause tracker / status change block
     pause_tracker = ""
@@ -504,9 +507,24 @@ def build_message(
         days  = state.get("days_paused", 1)
         since = state.get("since", "unknown")
         cond  = state.get("resume_cond", "")
-        pause_tracker = f"PAUSE TRACKER\n  Paused since: {since} ( {days} day(s) )\n  Resume when: {cond}\n\n"
+        pause_tracker = f"*PAUSE TRACKER*\n  Paused since: {since} ( {days} day(s) )\n  Resume when: {cond}\n\n"
     elif status_change_msg:
-        pause_tracker = f"STATUS CHANGE\n  {status_change_msg}\n\n"
+        pause_tracker = f"*STATUS CHANGE*\n  {status_change_msg}\n\n"
+
+    # When paused, new entries and rolling are both disabled.
+    is_paused = bool(state and state.get("paused"))
+    trade_sections = ""
+    if not is_paused:
+        trade_sections = (
+            f"*STRIKE TO USE:*  {exact_strike}  ( {strike_note} )\n"
+            f"*DTE:* closest expiry to 14d\n"
+            f"\n"
+            f"*IF ROLLING:*\n"
+            f"  ITM → roll to {exact_strike}, same closest-14-DTE expiry\n"
+            f"  3+ rolls already → let it ride, no more rolls\n"
+            f"  Net roll cost > original premium collected → close the call, don't roll\n"
+            f"\n"
+        )
 
     # Existing position close guidance
     close_guidance = ""
@@ -551,14 +569,7 @@ def build_message(
         f"{reasons_block}"
         f"{close_guidance}"
         f"{pause_tracker}"
-        f"*STRIKE TO USE:*  {exact_strike}  ( {strike_note} )\n"
-        f"*DTE:* closest expiry to 14d\n"
-        f"\n"
-        f"*IF ROLLING:*\n"
-        f"  ITM → roll to {exact_strike}, same closest-14-DTE expiry\n"
-        f"  3+ rolls already → let it ride, no more rolls\n"
-        f"  Net roll cost > original premium collected → close the call, don't roll\n"
-        f"\n"
+        f"{trade_sections}"
         f"{div}\n"
         f"*STRATEGY (ref)*\n"
         f"  Entry      +$3 OTM | closest to 14d DTE | bi-weekly\n"
@@ -582,6 +593,14 @@ def build_message(
 def send_telegram(subject: str, body: str) -> None:
     """Send Telegram message with Markdown bold formatting. Falls back to plain text on parse error."""
     text = f"*{subject}*\n\n{body}"
+
+    if DRY_RUN:
+        print("  DRY_RUN=1 set — skipping Telegram send.")
+        print("  --- MESSAGE PREVIEW START ---")
+        print(text)
+        print("  --- MESSAGE PREVIEW END ---")
+        return
+
     url  = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
     resp = requests.post(url, json={"chat_id": TELEGRAM_CHAT, "text": text, "parse_mode": "Markdown"}, timeout=15).json()

@@ -66,13 +66,19 @@ For full strategy rationale and 9Sig integration rules, see [`skill/references/9
 3. Copy the bot token ( format: `123456789:ABCdef...` ).
 4. Send your new bot any message ( e.g. "hi" ) to register your chat ID.
 
-### 2. Configure the Script
+### 2. Configure environment variables
 
-Edit the top of `send_reminder.py`:
+Create a local `.env` file:
 
-```python
-TELEGRAM_TOKEN = "your_bot_token_here"
-TELEGRAM_CHAT  = "your_chat_id_here"   # fetch via getUpdates if unsure
+```bash
+cp .env.example .env
+```
+
+Then set:
+
+```env
+TELEGRAM_TOKEN=123456789:ABCdef...
+TELEGRAM_CHAT=123456789
 ```
 
 To fetch your chat ID automatically:
@@ -83,22 +89,51 @@ curl "https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates"
 ### 3. Install Dependencies
 
 ```bash
-pip install requests pytz
+pip install requests pytz python-dotenv
 ```
 
 ### 4. Test Run
 
+Normal send:
 ```bash
 python send_reminder.py
 ```
 
-### 5. Schedule ( Manus Scheduler )
+Dry-run (builds and prints message but does not send to Telegram):
+```bash
+DRY_RUN=1 python send_reminder.py
+```
 
-The script is pre-scheduled via Manus at:
-- **8:30pm SGT** Mon–Fri during EDT ( Mar–Nov )
-- **9:30pm SGT** Mon–Fri during EST ( Nov–Mar )
+### 5. Schedule
 
-To run via system cron instead ( SGT = UTC+8 ):
+#### Option A: GitHub Actions (optional)
+A workflow is included at `.github/workflows/daily-reminder.yml`.
+
+Credential sources (either works):
+- **Recommended:** repo **Secrets** (`TELEGRAM_TOKEN`, `TELEGRAM_CHAT`)
+- **Also supported:** repo **Variables** with the same names
+
+Path in GitHub UI:
+- **Settings → Secrets and variables → Actions**
+
+Then run via:
+- scheduled cron (already configured for both EDT/EST windows), or
+- **Actions → TQQQ Covered Call Reminder → Run workflow**.
+
+If you do **not** see `TQQQ Covered Call Reminder` in Actions:
+1. Open a PR that includes `.github/workflows/daily-reminder.yml`.
+2. Merge that PR into your default branch (`master`/`main`).
+3. Ensure Actions are enabled for the repo/org.
+4. Refresh Actions page; the workflow should appear in the left sidebar.
+
+#### Option B: Manus / Local scheduler
+The script can also run via Manus / cron (no GitHub required).
+
+For non-GitHub usage, configure credentials in your runtime environment:
+- Local machine: create `.env` from `.env.example`.
+- Manus/cron/server: set environment variables `TELEGRAM_TOKEN` and `TELEGRAM_CHAT` in the scheduler/job config.
+
+Cron example (SGT = UTC+8):
 ```
 # EDT season: 8:30pm SGT = 12:30 UTC
 30 12 * * 1-5 /usr/bin/python3 /path/to/send_reminder.py
@@ -106,6 +141,21 @@ To run via system cron instead ( SGT = UTC+8 ):
 # EST season: 9:30pm SGT = 13:30 UTC
 30 13 * * 1-5 /usr/bin/python3 /path/to/send_reminder.py
 ```
+
+
+### Scheduler conflict note
+
+
+How to avoid scheduler conflicts (Manus vs GitHub):
+1. Pick one primary scheduler.
+2. If using Manus only, disable GitHub schedule by removing the `schedule:` block in `.github/workflows/daily-reminder.yml` (keep `workflow_dispatch` for manual runs if wanted).
+3. If using GitHub only, disable the Manus job in Manus scheduler UI.
+4. Verify only one run source is active to avoid duplicate Telegram messages.
+
+If both Manus scheduler and GitHub Actions schedule are enabled, the script may run twice and send duplicate messages.
+Use **one scheduler only**:
+- Keep Manus as primary: disable/remove the `schedule` block in `.github/workflows/daily-reminder.yml` and keep `workflow_dispatch` for manual runs.
+- Keep GitHub Actions as primary: disable Manus schedule.
 
 ---
 
