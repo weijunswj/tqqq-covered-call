@@ -2,10 +2,8 @@ name: TQQQ Covered Call Reminder
 
 on:
   schedule:
-    # 12:30 UTC Mon-Fri (8:30pm SGT during EDT)
-    - cron: '30 12 * * 1-5'
-    # 13:30 UTC Mon-Fri (9:30pm SGT during EST)
-    - cron: '30 13 * * 1-5'
+    # GitHub Actions cron is UTC-only; include both DST variants in one expression.
+    - cron: '30 12,13 * * 1-5'
   workflow_dispatch:
 
 jobs:
@@ -25,7 +23,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pytz python-dotenv
 
+      - name: Decide whether this UTC slot matches 8:30am ET
+        id: slot
+        shell: bash
+        run: |
+          set -euo pipefail
+          ET_TIME="$(TZ=America/New_York date +%H:%M)"
+          if [[ "$ET_TIME" == "08:30" ]]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "Running job: current ET time is $ET_TIME"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping job: current ET time is $ET_TIME (target is 08:30)"
+          fi
+
       - name: Run reminder
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.slot.outputs.should_run == 'true' }}
         env:
           # Prefer Secrets; if missing, fall back to Actions Variables.
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}

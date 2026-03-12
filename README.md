@@ -117,8 +117,10 @@ Path in GitHub UI:
 - **Settings → Secrets and variables → Actions**
 
 Then run via:
-- scheduled cron (already configured for both EDT/EST windows), or
+- scheduled cron (single UTC cron expression covering both DST UTC hours), or
 - **Actions → TQQQ Covered Call Reminder → Run workflow**.
+
+GitHub Actions cron is UTC-only (no America/New_York timezone setting), so the workflow uses one cron expression that covers both possible UTC hours and an ET-time guard; it executes only when local ET time is exactly **08:30 America/New_York**.
 
 If you do **not** see `TQQQ Covered Call Reminder` in Actions:
 1. Open a PR that includes `.github/workflows/daily-reminder.yml`.
@@ -152,7 +154,7 @@ How to avoid scheduler conflicts (Manus vs GitHub):
 3. If using GitHub only, disable the Manus job in Manus scheduler UI.
 4. Verify only one run source is active to avoid duplicate Telegram messages.
 
-If both Manus scheduler and GitHub Actions schedule are enabled, the script may run twice and send duplicate messages.
+If both Manus scheduler and GitHub Actions schedule are enabled, the script may still run twice and send duplicate Telegram messages.
 Use **one scheduler only**:
 - Keep Manus as primary: disable/remove the `schedule` block in `.github/workflows/daily-reminder.yml` and keep `workflow_dispatch` for manual runs.
 - Keep GitHub Actions as primary: disable Manus schedule.
