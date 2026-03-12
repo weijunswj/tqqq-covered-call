@@ -597,21 +597,95 @@ def send_telegram(subject: str, body: str) -> None:
         print(f"  Sent OK ( message_id: {resp['result']['message_id']} )")
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+import time
+
+def fetch_all_data() -> tuple:
+    """Fetch all market data. Returns tuple of ( tqqq, vix, adx_data, fomc, macro, holidays, earnings, tmrw_earnings )."""
+    tqqq                    = get_tqqq_data()
+    vix                     = get_vix()
+    adx_data                = get_adx_and_ath_dd()
+    fomc, macro, holidays   = get_forexfactory_events()
+    earnings, tmrw_earnings = get_big_tech_earnings()
+    return tqqq, vix, adx_data, fomc, macro, holidays, earnings, tmrw_earnings
+
+
+def data_has_errors(tqqq, vix, adx_data) -> list:
+    """Return list of failed sources. Empty = all good."""
+    failed = []
+    if "error" in tqqq:
+        failed.append("TQQQ price")
+    if vix is None:
+        failed.append("VIX")
+    if adx_data and "error" in adx_data:
+        failed.append("ADX / ATH DD")
+    return failed
+
+
+def notify_retry(failed: list, retry_in_mins: int) -> None:
+    """Send a short Telegram alert that data fetch failed and will retry."""
+    date_str = datetime.now(SGT).strftime("%a, %d %b %Y %H:%M SGT")
+    msg = (
+        f"⚠️ [TQQQ CC] {date_str}\n"
+        f"Data fetch failed: {', '.join(failed)}\n"
+        f"Retrying in {retry_in_mins} min(s)..."
+    )
+    url  = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    try:
+        requests.post(url, json={"chat_id": TELEGRAM_CHAT, "text": msg}, timeout=10)
+        print(f"  [RETRY NOTICE] Sent. Retrying in {retry_in_mins}m.")
+    except Exception as e:
+        print(f"  [RETRY NOTICE] Failed to send: {e}")
+
+
+def notify_final_failure(failed: list) -> None:
+    """Send a final Telegram alert that all retries are exhausted."""
+    date_str = datetime.now(SGT).strftime("%a, %d %b %Y %H:%M SGT")
+    msg = (
+        f"🚨 [TQQQ CC] {date_str}\n"
+        f"All retries failed. Sources down: {', '.join(failed)}\n"
+        f"⚠️ Investigate manually — no reminder sent today."
+    )
+    url  = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    try:
+        requests.post(url, json={"chat_id": TELEGRAM_CHAT, "text": msg}, timeout=10)
+        print("  [FINAL FAILURE] Notified via Telegram.")
+    except Exception as e:
+        print(f"  [FINAL FAILURE] Could not notify: {e}")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     print(f"[{datetime.now(SGT).strftime('%Y-%m-%d %H:%M SGT')}] Running TQQQ pre-market reminder...")
 
-    tqqq                     = get_tqqq_data()
-    vix                      = get_vix()
-    adx_data                 = get_adx_and_ath_dd()
-    fomc, macro, holidays    = get_forexfactory_events()
-    earnings, tmrw_earnings  = get_big_tech_earnings()
+    # Retry schedule: wait 1min, then 15min, then 30min before giving up
+    RETRY_DELAYS = [1, 15, 30]  # minutes
+    attempt = 0
+    tqqq = vix = adx_data = fomc = macro = holidays = earnings = tmrw_earnings = None
+    fomc, macro, holidays, earnings, tmrw_earnings = [], [], [], [], []
 
-    action, flags, pause_until = evaluate_status(
-        tqqq, vix, fomc, macro, holidays, earnings, tmrw_earnings, adx_data
-    )
-    state, change_msg = update_state(action, pause_until, tqqq, vix)
+    while attempt <= len(RETRY_DELAYS):
+        tqqq, vix, adx_data, fomc, macro, holidays, earnings, tmrw_earnings = fetch_all_data()
+        failed = data_has_errors(tqqq, vix, adx_data)
+
+        if not failed:
+            print(f"  Data fetch OK on attempt {attempt + 1}.")
+            break
+
+        print(f"  Attempt {attempt + 1} failed. Sources: {failed}")
+
+        if attempt < len(RETRY_DELAYS):
+            wait_mins = RETRY_DELAYS[attempt]
+            notify_retry(failed, wait_mins)
+            time.sleep(wait_mins * 60)
+            attempt += 1
+        else:
+            # All retries exhausted
+            notify_final_failure(failed)
+            print("  All retries exhausted. Exiting.")
+            sys.exit(1)
 
     # Debug output
     print(f"  TQQQ      : {tqqq}")
@@ -621,6 +695,12 @@ if __name__ == "__main__":
     print(f"  Macro     : {macro}")
     print(f"  Holidays  : {holidays}")
     print(f"  Earnings  : today={earnings}  tomorrow={tmrw_earnings}")
+
+    action, flags, pause_until = evaluate_status(
+        tqqq, vix, fomc, macro, holidays, earnings, tmrw_earnings, adx_data
+    )
+    state, change_msg = update_state(action, pause_until, tqqq, vix)
+
     print(f"  Decision  : {action}")
     print(f"  State     : {state}")
     if change_msg:
