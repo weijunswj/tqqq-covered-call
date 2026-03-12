@@ -117,7 +117,7 @@ Path in GitHub UI:
 - **Settings → Secrets and variables → Actions**
 
 Then run via:
-- scheduled cron (already configured for both EDT/EST windows), or
+- scheduled cron (configured for both EDT/EST windows with an ET-time guard to send only once/day), or
 - **Actions → TQQQ Covered Call Reminder → Run workflow**.
 
 If you do **not** see `TQQQ Covered Call Reminder` in Actions:

@@ -2,29 +2,45 @@ name: TQQQ Covered Call Reminder
 
 on:
   schedule:
-    # Single weekday trigger to avoid duplicate notifications.
-    # Runs at 13:30 UTC Mon-Fri (9:30pm SGT during EST / 9:30pm SGT baseline).
+    # Keep both UTC windows to cover 08:30 ET across EDT/EST.
     - cron: '30 13 * * 1-5'
+    - cron: '30 12 * * 1-5'
   workflow_dispatch:
 
 jobs:
   send-reminder:
     runs-on: ubuntu-latest
     steps:
+      - name: Check 08:30 ET pre-market window
+        id: premarket_window
+        run: |
+          et_time="$(TZ=America/New_York date '+%H:%M')"
+          echo "Current ET time: ${et_time}"
+          if [ "${et_time}" = "08:30" ]; then
+            echo "run_reminder=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_reminder=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping duplicate DST window trigger."
+          fi
+
       - name: Checkout
+        if: steps.premarket_window.outputs.run_reminder == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Python
+        if: steps.premarket_window.outputs.run_reminder == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
+        if: steps.premarket_window.outputs.run_reminder == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install requests pytz python-dotenv
 
       - name: Run reminder
+        if: steps.premarket_window.outputs.run_reminder == 'true'
         env:
           # Prefer Secrets; if missing, fall back to Actions Variables.
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
