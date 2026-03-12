@@ -28,8 +28,9 @@ load_dotenv(Path(__file__).parent / ".env")
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT  = os.getenv("TELEGRAM_CHAT")
+DRY_RUN        = os.getenv("DRY_RUN", "").lower() in {"1", "true", "yes", "on"}
 
-if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
+if not DRY_RUN and (not TELEGRAM_TOKEN or not TELEGRAM_CHAT):
     print("ERROR: TELEGRAM_TOKEN and TELEGRAM_CHAT must be set in .env", file=sys.stderr)
     sys.exit(1)
 
@@ -592,6 +593,14 @@ def build_message(
 def send_telegram(subject: str, body: str) -> None:
     """Send Telegram message with Markdown bold formatting. Falls back to plain text on parse error."""
     text = f"*{subject}*\n\n{body}"
+
+    if DRY_RUN:
+        print("  DRY_RUN=1 set — skipping Telegram send.")
+        print("  --- MESSAGE PREVIEW START ---")
+        print(text)
+        print("  --- MESSAGE PREVIEW END ---")
+        return
+
     url  = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
     resp = requests.post(url, json={"chat_id": TELEGRAM_CHAT, "text": text, "parse_mode": "Markdown"}, timeout=15).json()
