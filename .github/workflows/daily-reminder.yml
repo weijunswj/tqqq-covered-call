@@ -2,9 +2,8 @@ name: TQQQ Covered Call Reminder
 
 on:
   schedule:
-    # 12:30 UTC Mon-Fri (8:30pm SGT during EDT)
-    - cron: '30 12 * * 1-5'
-    # 13:30 UTC Mon-Fri (9:30pm SGT during EST)
+    # Single weekday trigger to avoid duplicate notifications.
+    # Runs at 13:30 UTC Mon-Fri (9:30pm SGT during EST / 9:30pm SGT baseline).
     - cron: '30 13 * * 1-5'
   workflow_dispatch:
 
