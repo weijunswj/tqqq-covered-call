@@ -496,7 +496,9 @@ def build_message(
     real_flags = [f for f in flags if "clear" not in f.lower()]
     flags_text = ("\n".join(f"  {f}" for f in real_flags) + "\n") if real_flags else ""
     pause_text = (f"  RESUME: {pause_until}\n") if pause_until else ""
-    reasons_block = f"WHY\n{flags_text}{pause_text}\n" if real_flags else ""
+    # Keep WHY/RESUME visually separated for readability in Telegram.
+    pause_gap = "\n" if (flags_text and pause_text) else ""
+    reasons_block = f"*WHY*\n{flags_text}{pause_gap}{pause_text}\n" if real_flags else ""
 
     # Pause tracker / status change block
     pause_tracker = ""
@@ -504,9 +506,24 @@ def build_message(
         days  = state.get("days_paused", 1)
         since = state.get("since", "unknown")
         cond  = state.get("resume_cond", "")
-        pause_tracker = f"PAUSE TRACKER\n  Paused since: {since} ( {days} day(s) )\n  Resume when: {cond}\n\n"
+        pause_tracker = f"*PAUSE TRACKER*\n  Paused since: {since} ( {days} day(s) )\n  Resume when: {cond}\n\n"
     elif status_change_msg:
-        pause_tracker = f"STATUS CHANGE\n  {status_change_msg}\n\n"
+        pause_tracker = f"*STATUS CHANGE*\n  {status_change_msg}\n\n"
+
+    # When paused, new entries and rolling are both disabled.
+    is_paused = bool(state and state.get("paused"))
+    trade_sections = ""
+    if not is_paused:
+        trade_sections = (
+            f"*STRIKE TO USE:*  {exact_strike}  ( {strike_note} )\n"
+            f"*DTE:* closest expiry to 14d\n"
+            f"\n"
+            f"*IF ROLLING:*\n"
+            f"  ITM → roll to {exact_strike}, same closest-14-DTE expiry\n"
+            f"  3+ rolls already → let it ride, no more rolls\n"
+            f"  Net roll cost > original premium collected → close the call, don't roll\n"
+            f"\n"
+        )
 
     # Existing position close guidance
     close_guidance = ""
@@ -551,14 +568,7 @@ def build_message(
         f"{reasons_block}"
         f"{close_guidance}"
         f"{pause_tracker}"
-        f"*STRIKE TO USE:*  {exact_strike}  ( {strike_note} )\n"
-        f"*DTE:* closest expiry to 14d\n"
-        f"\n"
-        f"*IF ROLLING:*\n"
-        f"  ITM → roll to {exact_strike}, same closest-14-DTE expiry\n"
-        f"  3+ rolls already → let it ride, no more rolls\n"
-        f"  Net roll cost > original premium collected → close the call, don't roll\n"
-        f"\n"
+        f"{trade_sections}"
         f"{div}\n"
         f"*STRATEGY (ref)*\n"
         f"  Entry      +$3 OTM | closest to 14d DTE | bi-weekly\n"
