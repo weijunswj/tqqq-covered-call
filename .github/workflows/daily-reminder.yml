@@ -41,12 +41,12 @@ jobs:
           ET_MINUTE_INT="$((10#$ET_MINUTE))"
 
           TARGET_UTC_HOUR="$(python - <<'PY'
-from datetime import datetime
-from zoneinfo import ZoneInfo
-now_et = datetime.now(ZoneInfo('America/New_York'))
-target_et = now_et.replace(hour=8, minute=30, second=0, microsecond=0)
-print(target_et.astimezone(ZoneInfo('UTC')).strftime('%H'))
-PY
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          now_et = datetime.now(ZoneInfo('America/New_York'))
+          target_et = now_et.replace(hour=8, minute=30, second=0, microsecond=0)
+          print(target_et.astimezone(ZoneInfo('UTC')).strftime('%H'))
+          PY
           )"
 
           if [[ "$EVENT_NAME" == "schedule" && -n "${EVENT_SCHEDULE:-}" ]]; then
