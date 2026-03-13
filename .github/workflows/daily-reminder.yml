@@ -64,7 +64,7 @@ PY
             echo "Running job: current ET time is $ET_TIME (target UTC hour $TARGET_UTC_HOUR, scheduled slot '$EVENT_SCHEDULE')"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping job: current ET time is $ET_TIME (target window is 08:30-08:59)."
+            echo "Skipping job: current ET time is $ET_TIME (target window is 08:30-08:59)"
           fi
 
       - name: Run reminder
