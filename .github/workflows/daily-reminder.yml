@@ -28,10 +28,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ET_HOUR="$(TZ=America/New_York date +%H)"
-          ET_MINUTE="$(TZ=America/New_York date +%M)"
+          ET_TIME="$(TZ=America/New_York date +%H:%M)"
+          ET_HOUR="${ET_TIME%:*}"
+          ET_MINUTE="${ET_TIME#*:}"
           ET_MINUTE_INT="$((10#$ET_MINUTE))"
-          ET_TIME="${ET_HOUR}:${ET_MINUTE}"
 
           # GitHub scheduled runs can start a few minutes late under load.
           if [[ "$ET_HOUR" == "08" && "$ET_MINUTE_INT" -ge 30 && "$ET_MINUTE_INT" -le 35 ]]; then
