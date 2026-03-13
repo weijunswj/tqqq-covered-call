@@ -28,13 +28,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ET_TIME="$(TZ=America/New_York date +%H:%M)"
-          if [[ "$ET_TIME" == "08:30" ]]; then
+          ET_HOUR="$(TZ=America/New_York date +%H)"
+          ET_MINUTE="$(TZ=America/New_York date +%M)"
+          ET_TIME="${ET_HOUR}:${ET_MINUTE}"
+
+          # GitHub scheduled runs can start a few minutes late under load.
+          if [[ "$ET_HOUR" == "08" && "$ET_MINUTE" -ge 30 && "$ET_MINUTE" -le 35 ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             echo "Running job: current ET time is $ET_TIME"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping job: current ET time is $ET_TIME (target is 08:30)"
+            echo "Skipping job: current ET time is $ET_TIME (target window is 08:30-08:35)"
           fi
 
       - name: Run reminder
