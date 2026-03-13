@@ -117,10 +117,19 @@ Path in GitHub UI:
 - **Settings → Secrets and variables → Actions**
 
 Then run via:
-- scheduled cron (single UTC cron expression covering both DST UTC hours), or
+- scheduled cron (two UTC cron expressions covering both DST UTC hours), or
 - **Actions → TQQQ Covered Call Reminder → Run workflow**.
 
-GitHub Actions cron is UTC-only (no America/New_York timezone setting), so the workflow uses one cron expression that covers both possible UTC hours and an ET-time guard; it executes only when local ET time is exactly **08:30 America/New_York**.
+
+**Temporary 10pm test without touching `main`:**
+1. Create a branch ( e.g. `test-10pm` ).
+2. Open **Actions → TQQQ Covered Call Reminder → Run workflow**.
+3. Choose branch `test-10pm` in the **Use workflow from** selector.
+4. Click **Run workflow** at 10:00pm.
+
+> Note: GitHub `schedule` only uses the workflow file from the default branch, so you cannot run a branch-only scheduled cron without changing `main`. Manual `workflow_dispatch` on a branch is the safe temporary approach.
+
+GitHub Actions cron is UTC-only (no America/New_York timezone setting), so the workflow uses two cron expressions ( one per UTC hour ) plus an ET-time guard; it executes only when local ET time is within **08:30–08:59 America/New_York** ( to tolerate delayed runner starts ).
 
 If you do **not** see `TQQQ Covered Call Reminder` in Actions:
 1. Open a PR that includes `.github/workflows/daily-reminder.yml`.

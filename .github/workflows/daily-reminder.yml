@@ -5,8 +5,9 @@ permissions:
 
 on:
   schedule:
-    # GitHub Actions cron is UTC-only; include both DST variants in one expression.
-    - cron: '30 12,13 * * 1-5'
+    # GitHub Actions cron is UTC-only; include both DST variants.
+    - cron: '30 12 * * 1-5'
+    - cron: '30 13 * * 1-5'
   workflow_dispatch:
 
 jobs:
@@ -26,9 +27,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pytz python-dotenv
 
-      - name: Decide whether this UTC slot matches 8:30am ET
+      - name: Decide whether this slot is today's valid 8:30am ET run
         id: slot
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
           set -euo pipefail
           ET_TIME="$(TZ=America/New_York date +%H:%M)"
@@ -36,13 +40,31 @@ jobs:
           ET_MINUTE="${ET_TIME#*:}"
           ET_MINUTE_INT="$((10#$ET_MINUTE))"
 
-          # GitHub scheduled runs can start a few minutes late under load.
-          if [[ "$ET_HOUR" == "08" && "$ET_MINUTE_INT" -ge 30 && "$ET_MINUTE_INT" -le 35 ]]; then
+          TARGET_UTC_HOUR="$(python - <<'PY'
+from datetime import datetime
+from zoneinfo import ZoneInfo
+now_et = datetime.now(ZoneInfo('America/New_York'))
+target_et = now_et.replace(hour=8, minute=30, second=0, microsecond=0)
+print(target_et.astimezone(ZoneInfo('UTC')).strftime('%H'))
+PY
+          )"
+
+          if [[ "$EVENT_NAME" == "schedule" && -n "${EVENT_SCHEDULE:-}" ]]; then
+            SLOT_UTC_HOUR="$(awk '{print $2}' <<< "$EVENT_SCHEDULE")"
+            if [[ "$SLOT_UTC_HOUR" != "$TARGET_UTC_HOUR" ]]; then
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+              echo "Skipping job: schedule '$EVENT_SCHEDULE' is not today's 08:30 ET slot (expected UTC hour $TARGET_UTC_HOUR)."
+              exit 0
+            fi
+          fi
+
+          # Allow delayed starts for the intended slot, but only within 08:30-08:59 ET.
+          if [[ "$ET_HOUR" == "08" && "$ET_MINUTE_INT" -ge 30 ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "Running job: current ET time is $ET_TIME"
+            echo "Running job: current ET time is $ET_TIME (target UTC hour $TARGET_UTC_HOUR, scheduled slot '$EVENT_SCHEDULE')"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping job: current ET time is $ET_TIME (target window is 08:30-08:35)"
+            echo "Skipping job: current ET time is $ET_TIME (target window is 08:30-08:59)."
           fi
 
       - name: Run reminder
