@@ -1,5 +1,8 @@
 name: TQQQ Covered Call Reminder
 
+permissions:
+  contents: read
+
 on:
   schedule:
     # GitHub Actions cron is UTC-only; include both DST variants in one expression.
