@@ -30,10 +30,11 @@ jobs:
           set -euo pipefail
           ET_HOUR="$(TZ=America/New_York date +%H)"
           ET_MINUTE="$(TZ=America/New_York date +%M)"
+          ET_MINUTE_INT="$((10#$ET_MINUTE))"
           ET_TIME="${ET_HOUR}:${ET_MINUTE}"
 
           # GitHub scheduled runs can start a few minutes late under load.
-          if [[ "$ET_HOUR" == "08" && "$ET_MINUTE" -ge 30 && "$ET_MINUTE" -le 35 ]]; then
+          if [[ "$ET_HOUR" == "08" && "$ET_MINUTE_INT" -ge 30 && "$ET_MINUTE_INT" -le 35 ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             echo "Running job: current ET time is $ET_TIME"
           else
