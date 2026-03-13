@@ -36,13 +36,14 @@ jobs:
           ET_MINUTE="${ET_TIME#*:}"
           ET_MINUTE_INT="$((10#$ET_MINUTE))"
 
-          # GitHub scheduled runs can start a few minutes late under load.
-          if [[ "$ET_HOUR" == "08" && "$ET_MINUTE_INT" -ge 30 && "$ET_MINUTE_INT" -le 35 ]]; then
+          # GitHub scheduled runs can start late under load.
+          # Keep the whole 08:30-08:59 ET window so delayed starts still send.
+          if [[ "$ET_HOUR" == "08" && "$ET_MINUTE_INT" -ge 30 ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             echo "Running job: current ET time is $ET_TIME"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping job: current ET time is $ET_TIME (target window is 08:30-08:35)"
+            echo "Skipping job: current ET time is $ET_TIME (target window is 08:30-08:59)"
           fi
 
       - name: Run reminder
