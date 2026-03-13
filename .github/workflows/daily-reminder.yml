@@ -40,14 +40,7 @@ jobs:
           ET_MINUTE="${ET_TIME#*:}"
           ET_MINUTE_INT="$((10#$ET_MINUTE))"
 
-          TARGET_UTC_HOUR="$(python - <<'PY'
-from datetime import datetime
-from zoneinfo import ZoneInfo
-now_et = datetime.now(ZoneInfo('America/New_York'))
-target_et = now_et.replace(hour=8, minute=30, second=0, microsecond=0)
-print(target_et.astimezone(ZoneInfo('UTC')).strftime('%H'))
-PY
-          )"
+          TARGET_UTC_HOUR="$(python -c "from datetime import datetime; from zoneinfo import ZoneInfo; now_et = datetime.now( ZoneInfo( 'America/New_York' ) ); target_et = now_et.replace( hour=8, minute=30, second=0, microsecond=0 ); print( target_et.astimezone( ZoneInfo( 'UTC' ) ).strftime( '%H' ) )")"
 
           if [[ "$EVENT_NAME" == "schedule" && -n "${EVENT_SCHEDULE:-}" ]]; then
             SLOT_UTC_HOUR="$(awk '{print $2}' <<< "$EVENT_SCHEDULE")"
