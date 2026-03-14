@@ -11,7 +11,7 @@ Sell **OTM covered calls** on TQQQ every week to generate income. The strategy o
 
 | Parameter | Value |
 |---|---|
-| Strike | Default: current price + $3 ( OTM ); if VIX 22–25: +$3.5 ( OTM ) |
+| Strike | Default: current price + $3 ( OTM ); if VIX 18–22: +$3.5 ( OTM ) |
 | DTE | Default: closest weekly expiry to 7 DTE |
 | DTE exception | If VIX < 16 and 7 DTE +$3 OTM mid premium < $0.20, use closest expiry to 14 DTE |
 | Cycle | Weekly |
@@ -23,7 +23,7 @@ Sell **OTM covered calls** on TQQQ every week to generate income. The strategy o
 
 ## Entry Conditions ( ALL must be true )
 
-- VIX between 15–25.
+- VIX between 15–22.
 - ADX ( 14 ) < 25 — range-bound, no strong trend.
 
 ---
@@ -33,12 +33,14 @@ Sell **OTM covered calls** on TQQQ every week to generate income. The strategy o
 | Trigger | Threshold | Action |
 |---|---|---|
 | ADX trending | ADX > 25 | Pause new entries |
-| VIX elevated | VIX > 25 | Pause new entries |
+| ADX slope risk | ADX < 25 but rises > 3 day-over-day | Pause new entries |
+| VIX elevated | VIX > 22 | Pause new entries |
 | VIX extreme | VIX ≥ 40 | Close existing call + sit out |
 | FOMC / Fed event | Today | Skip open |
 | CPI / PCE / NFP | Today | Skip open |
-| Big tech earnings before open | MSFT, AAPL, NVDA, GOOGL, GOOG, META, AMZN, TSLA, AMD, AVGO, NFLX, QCOM | Skip open |
-| VIX too low | VIX < 15 | Skip — premium too thin |
+| Big tech earnings before open ( today / tomorrow ) | MSFT, AAPL, NVDA, GOOGL, GOOG, META, AMZN, TSLA, AMD, AVGO, NFLX, QCOM | Pause new entries |
+| VIX too low | VIX < 15 | Pause — premium too thin |
+| Pre-market gap-up | TQQQ pre-market gap > +4% vs previous close | Pause new entries |
 
 ---
 
@@ -47,7 +49,7 @@ Sell **OTM covered calls** on TQQQ every week to generate income. The strategy o
 | Pause Reason | Resume When |
 |---|---|
 | Bull run / ADX > 25 | TQQQ pulls back ≥ 5% from recent high |
-| VIX 25–40 | VIX drops below 22 for 2 consecutive days |
+| VIX 22–40 | VIX drops below 22 for 2 consecutive days |
 | VIX ≥ 40 | VIX drops below 25 for 2 consecutive days |
 | FOMC / macro event | Next trading day |
 | Earnings at open | Next trading day |
@@ -57,7 +59,7 @@ Sell **OTM covered calls** on TQQQ every week to generate income. The strategy o
 ## Roll Decision Rules
 
 1. Check at market open only ( once per day ).
-2. If call is ITM → buy back + sell new call at strike per VIX rule ( +$3 default, +$3.5 at VIX 22–25 ), same selected weekly expiry.
+2. If call is ITM → buy back + sell new call at strike per VIX rule ( +$3 default, +$3.5 at VIX 18–22 ), same selected weekly expiry.
 3. If 3+ rolls already done this cycle → let it ride, no more rolls.
 4. If net roll cost > original premium collected → close the call, don't roll.
 

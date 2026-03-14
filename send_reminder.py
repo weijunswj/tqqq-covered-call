@@ -158,6 +158,7 @@ def get_tqqq_data() -> dict:
         ten_day    = ((closes[-1] - closes[-11]) / closes[-11] * 100) if len(closes) >= 11 else None
         return {
             "price":          round(price, 2),
+            "prev_close":     round(prev, 2) if prev else None,
             "change_pct":     round(change_pct, 2),
             "ten_day_return": round(ten_day, 1) if ten_day is not None else None,
         }
@@ -279,14 +280,22 @@ def get_adx_and_ath_dd() -> dict:
             dx_list.append(dx)
 
         adx = None
+        adx_prev = None
         if len(dx_list) >= n:
+            adx_series = []
             adx_val = sum(dx_list[:n]) / n
+            adx_series.append(adx_val)
             for dx in dx_list[n:]:
                 adx_val = (adx_val * (n - 1) + dx) / n
-            adx = round(adx_val, 1)
+                adx_series.append(adx_val)
+            adx = round(adx_series[-1], 1)
+            if len(adx_series) >= 2:
+                adx_prev = round(adx_series[-2], 1)
 
         return {
             "adx":                adx,
+            "adx_prev":           adx_prev,
+            "adx_delta":          round(adx - adx_prev, 1) if (adx is not None and adx_prev is not None) else None,
             "ath_high_315":       round(ath_high, 2),
             "ath_dd_triggered":   ath_dd,
             "current_pct_of_ath": pct_of_ath,
@@ -294,6 +303,24 @@ def get_adx_and_ath_dd() -> dict:
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+def get_tqqq_premarket_gap(prev_close: float | None) -> float | None:
+    """Return pre-market gap % vs previous close. Returns None if unavailable."""
+    if prev_close is None:
+        return None
+    try:
+        url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=TQQQ"
+        r = requests.get(url, headers=HEADERS, timeout=10).json()
+        res = r.get("quoteResponse", {}).get("result", [])
+        if not res:
+            return None
+        pre = res[0].get("preMarketPrice")
+        if pre is None:
+            return None
+        return round((float(pre) - prev_close) / prev_close * 100, 2)
+    except Exception:
+        return None
 
 
 def get_forexfactory_events() -> tuple[list, list, list]:
@@ -386,6 +413,7 @@ def get_big_tech_earnings() -> tuple[list, list]:
 def evaluate_status(
     tqqq: dict,
     vix: float | None,
+    premarket_gap_pct: float | None,
     fomc_events: list,
     macro_events: list,
     usd_holidays: list,
@@ -395,7 +423,7 @@ def evaluate_status(
 ) -> tuple[str, list, str | None]:
     """
     Evaluate all checks and return ( action, flags, pause_until ).
-    Priority: VIX extreme > macro events > earnings > VIX elevated > ADX.
+    Priority: VIX extreme > macro events > earnings > VIX elevated > pre-market gap > ADX.
     """
     flags       = []
     action      = "✅ PROCEED"
@@ -441,6 +469,9 @@ def evaluate_status(
     if tmrw_earnings:
         syms = ", ".join(e["symbol"] for e in tmrw_earnings)
         flags.append(f"🟡 EARNINGS TOMORROW PRE-OPEN: {syms} → If call within $2 of strike, close at open today.")
+        if action == "✅ PROCEED":
+            action      = "⏸️ PAUSE — EARNINGS TOMORROW"
+            pause_until = "Resume next trading day after earnings event."
 
     # VIX checks
     if vix is not None:
@@ -448,16 +479,23 @@ def evaluate_status(
             flags.append(f"🔴 VIX = {vix} ( ≥40 ) — extreme vol")
             action      = "🛑 CLOSE & SIT OUT"
             pause_until = "Resume when VIX drops below 25 for 2 consecutive days."
-        elif vix > 25:
-            flags.append(f"🔴 VIX = {vix} ( >25 ) — above sweet spot")
+        elif vix > 22:
+            flags.append(f"🔴 VIX = {vix} ( >22 ) — above proceed band")
             if action == "✅ PROCEED":
                 action      = "⏸️ PAUSE — HIGH VIX"
-                pause_until = "Resume when VIX drops back into 15–25 range."
+                pause_until = "Resume when VIX drops back into 15–22 range."
         elif vix < 15:
             flags.append(f"🟡 VIX = {vix} ( <15 ) — too calm, premium too thin")
             if action == "✅ PROCEED":
-                action      = "⏸️ SKIP — LOW VIX"
+                action      = "⏸️ PAUSE — LOW VIX"
                 pause_until = "Resume when VIX rises back above 15."
+
+    # Pre-market gap-up check
+    if premarket_gap_pct is not None and premarket_gap_pct > 4:
+        flags.append(f"🔴 TQQQ PRE-MARKET GAP = +{premarket_gap_pct}% ( >4% ) — gap-up exceeds threshold")
+        if action == "✅ PROCEED":
+            action      = "⏸️ PAUSE — PRE-MARKET GAP-UP"
+            pause_until = "Resume when pre-market gap-up risk normalises."
 
     # ATH DD display-only notes ( Phoenix 9Sig status )
     if adx_data and "error" not in adx_data:
@@ -473,11 +511,20 @@ def evaluate_status(
     # ADX trend strength check
     if adx_data and "error" not in adx_data and adx_data.get("adx") is not None:
         adx = adx_data["adx"]
+        adx_prev = adx_data.get("adx_prev")
+        adx_delta = adx_data.get("adx_delta")
         if adx > 25:
             flags.append(f"🔴 ADX = {adx} ( >25 ) — trending market, covered calls risky")
+            if adx_prev is not None and adx < adx_prev:
+                flags.append(f"🟡 ADX easing ( {adx_prev} → {adx} ) but still >25 — remain paused")
             if action == "✅ PROCEED":
                 action      = "⏸️ PAUSE — TRENDING ( ADX )"
                 pause_until = "Resume when ADX drops below 25 ( range-bound market )."
+        elif adx_delta is not None and adx_delta > 3:
+            flags.append(f"🔴 ADX rose sharply day-over-day ( {adx_prev} → {adx}, +{adx_delta} ) — trend forming")
+            if action == "✅ PROCEED":
+                action      = "⏸️ PAUSE — ADX RISING SHARPLY"
+                pause_until = "Resume when ADX rise cools and trend risk subsides."
         elif adx > 20:
             flags.append(f"🟡 ADX = {adx} ( 20–25 ) — watch, approaching trend zone")
 
@@ -517,8 +564,8 @@ def build_message(
     if "error" not in tqqq and tqqq.get("price"):
         price = tqqq["price"]
 
-        if vix is not None and 22 <= vix <= 25:
-            offset, strike_note = 3.5, "VIX 22–25 regime ( +$3.5 OTM )"
+        if vix is not None and 18 <= vix <= 22:
+            offset, strike_note = 3.5, "VIX 18–22 regime ( +$3.5 OTM )"
         else:
             offset, strike_note = 3, "Default ( +$3 OTM )"
         exact_strike = f"${round(price + offset)}"
@@ -617,12 +664,12 @@ def build_message(
         f"{trade_sections}"
         f"{div}\n"
         f"*STRATEGY (ref)*\n"
-        f"  Entry      +$3 OTM default ( +$3.5 at VIX 22–25 ) | closest weekly expiry | weekly\n"
+        f"  Entry      +$3 OTM default ( +$3.5 at VIX 18–22 ) | closest weekly expiry | weekly\n"
         f"  DTE rule   7 DTE default | if VIX < 16 and 7D +$3 mid < $0.20, use 14 DTE\n"
         f"  Roll       Once at open if ITM → new strike per VIX rule, same selected expiry | max 3 rolls/cycle\n"
         f"  Close      DTE 0 at open\n"
-        f"  Proceed    VIX 15–25 | ADX <25\n"
-        f"  Pause      ADX >25 | VIX >25 | FOMC/CPI/NFP day | earnings at open\n"
+        f"  Proceed    VIX 15–22 | ADX <25\n"
+        f"  Pause      ADX >25 or sharp +3 rise | VIX <15 or >22 | gap-up >4% | FOMC/CPI/NFP day | earnings at/tomorrow open\n"
         f"  Close CC   VIX ≥40\n"
         f"  Pre-event  Close call if within $2 of strike, day before FOMC/earnings\n"
         f"\n"
@@ -665,13 +712,14 @@ def send_telegram(subject: str, body: str) -> None:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def fetch_all_data() -> tuple:
-    """Fetch all market data. Returns tuple of ( tqqq, vix, adx_data, fomc, macro, holidays, earnings, tmrw_earnings )."""
+    """Fetch all market data. Returns tuple of ( tqqq, vix, premarket_gap_pct, adx_data, fomc, macro, holidays, earnings, tmrw_earnings )."""
     tqqq                    = get_tqqq_data()
     vix                     = get_vix()
+    premarket_gap_pct       = get_tqqq_premarket_gap(tqqq.get("prev_close") if "error" not in tqqq else None)
     adx_data                = get_adx_and_ath_dd()
     fomc, macro, holidays   = get_forexfactory_events()
     earnings, tmrw_earnings = get_big_tech_earnings()
-    return tqqq, vix, adx_data, fomc, macro, holidays, earnings, tmrw_earnings
+    return tqqq, vix, premarket_gap_pct, adx_data, fomc, macro, holidays, earnings, tmrw_earnings
 
 
 def data_has_errors(tqqq, vix, adx_data) -> list:
@@ -726,11 +774,11 @@ if __name__ == "__main__":
     # Retry schedule: wait 1min, then 15min, then 30min before giving up
     RETRY_DELAYS = [1, 15, 30]  # minutes
     attempt = 0
-    tqqq = vix = adx_data = fomc = macro = holidays = earnings = tmrw_earnings = None
+    tqqq = vix = premarket_gap_pct = adx_data = fomc = macro = holidays = earnings = tmrw_earnings = None
     fomc, macro, holidays, earnings, tmrw_earnings = [], [], [], [], []
 
     while attempt <= len(RETRY_DELAYS):
-        tqqq, vix, adx_data, fomc, macro, holidays, earnings, tmrw_earnings = fetch_all_data()
+        tqqq, vix, premarket_gap_pct, adx_data, fomc, macro, holidays, earnings, tmrw_earnings = fetch_all_data()
         failed = data_has_errors(tqqq, vix, adx_data)
 
         if not failed:
@@ -753,6 +801,7 @@ if __name__ == "__main__":
     # Debug output
     print(f"  TQQQ      : {tqqq}")
     print(f"  VIX       : {vix}")
+    print(f"  PreMktGap : {premarket_gap_pct}")
     print(f"  ADX/ATH   : {adx_data}")
     print(f"  FOMC      : {fomc}")
     print(f"  Macro     : {macro}")
@@ -760,7 +809,7 @@ if __name__ == "__main__":
     print(f"  Earnings  : today={earnings}  tomorrow={tmrw_earnings}")
 
     action, flags, pause_until = evaluate_status(
-        tqqq, vix, fomc, macro, holidays, earnings, tmrw_earnings, adx_data
+        tqqq, vix, premarket_gap_pct, fomc, macro, holidays, earnings, tmrw_earnings, adx_data
     )
     state, change_msg = update_state(action, pause_until, tqqq, vix)
 

@@ -13,6 +13,7 @@ Runs Mon–Fri before US market open. Fetches live data, evaluates conditions, a
 - **Selected expiry / DTE rule** ( weekly 7 DTE default, with low-vol exception ).
 - **Roll instructions** if you have an open position.
 - **Pre-event close warning** if FOMC or big tech earnings are tomorrow.
+- **Pre-market gap protection** ( pauses new entries if gap-up exceeds threshold ).
 - **9Sig status** — ATH DD status and % of 315d high ( display-only ).
 - **Pause day counter** — current streak + all-time total.
 
@@ -30,6 +31,7 @@ Runs Mon–Fri before US market open. Fetches live data, evaluates conditions, a
 | CPI / PCE / NFP today | ForexFactory JSON API |
 | US market holidays | ForexFactory JSON API |
 | Big tech earnings before open ( today + tomorrow ) | Nasdaq earnings API |
+| TQQQ pre-market gap ( vs previous close ) | Yahoo Finance quote API |
 
 **Big tech watchlist:** MSFT, AAPL, NVDA, GOOGL, GOOG, META, AMZN, TSLA, AMD, AVGO, NFLX, QCOM.
 
@@ -39,7 +41,7 @@ Runs Mon–Fri before US market open. Fetches live data, evaluates conditions, a
 
 | Parameter | Value |
 |---|---|
-| Strike | Default: +$3 OTM ( current price + $3 ); if VIX 22–25: +$3.5 OTM |
+| Strike | Default: +$3 OTM ( current price + $3 ); if VIX 18–22: +$3.5 OTM |
 | DTE | Default: closest weekly expiry to 7 DTE |
 | DTE exception | If VIX < 16 **and** 7 DTE +$3 OTM mid premium < $0.20, use closest expiry to 14 DTE |
 | Cycle | Weekly |
@@ -47,9 +49,9 @@ Runs Mon–Fri before US market open. Fetches live data, evaluates conditions, a
 | Max rolls/cycle | 3 — then let it ride |
 | Close | DTE 0 at open |
 
-**Proceed when:** VIX 15–25 · ADX < 25.
+**Proceed when:** VIX 15–22 · ADX < 25 and not rising sharply.
 
-**Pause when:** ADX > 25 · VIX > 25 · FOMC/CPI/NFP day · earnings at open.
+**Pause when:** ADX > 25, or ADX rises by >3 day-over-day · VIX < 15 or > 22 · TQQQ pre-market gap-up > 4% · FOMC/CPI/NFP day · earnings at open today or tomorrow.
 
 **Close existing call:** VIX ≥ 40.
 
