@@ -16,6 +16,7 @@ Configuration:
 import json
 import os
 import sys
+import time
 import requests
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -157,6 +158,7 @@ def get_tqqq_data() -> dict:
         ten_day    = ((closes[-1] - closes[-11]) / closes[-11] * 100) if len(closes) >= 11 else None
         return {
             "price":          round(price, 2),
+            "prev_close":     round(prev, 2) if prev else None,
             "change_pct":     round(change_pct, 2),
             "ten_day_return": round(ten_day, 1) if ten_day is not None else None,
         }
@@ -175,6 +177,42 @@ def get_vix() -> float | None:
         return None
 
 
+def get_closest_expiry_option_mid(price: float, dte_target: int, strike_offset: float) -> tuple[str | None, float | None]:
+    """
+    Fetch the closest listed expiry to `dte_target` and return:
+      ( expiry_label, mid premium for rounded price + strike_offset call ).
+    """
+    try:
+        now_ts = int(datetime.now(ET).timestamp())
+        target_ts = now_ts + dte_target * 24 * 60 * 60
+        chain_url = "https://query2.finance.yahoo.com/v7/finance/options/TQQQ"
+        chain_res = requests.get(chain_url, headers=HEADERS, timeout=10).json()
+        expiries = chain_res.get("optionChain", {}).get("result", [{}])[0].get("expirationDates", [])
+        if not expiries:
+            return None, None
+
+        chosen_expiry = min(expiries, key=lambda ts: abs(ts - target_ts))
+        expiry_dt = datetime.fromtimestamp(chosen_expiry, ET).date()
+        expiry_label = f"{expiry_dt.isoformat()} ( {max((expiry_dt - datetime.now(ET).date()).days, 0)} DTE )"
+
+        opt_url = f"https://query2.finance.yahoo.com/v7/finance/options/TQQQ?date={chosen_expiry}"
+        opt_res = requests.get(opt_url, headers=HEADERS, timeout=10).json()
+        calls = opt_res.get("optionChain", {}).get("result", [{}])[0].get("options", [{}])[0].get("calls", [])
+        if not calls:
+            return expiry_label, None
+
+        target_strike = round(price + strike_offset)
+        best_call = min(calls, key=lambda c: abs(float(c.get("strike", 0)) - target_strike))
+        bid = best_call.get("bid")
+        ask = best_call.get("ask")
+        if bid is None or ask is None:
+            return expiry_label, None
+        mid = round((float(bid) + float(ask)) / 2, 2)
+        return expiry_label, mid
+    except Exception:
+        return None, None
+
+
 def get_adx_and_ath_dd() -> dict:
     """
     Fetch 2 years of TQQQ daily OHLC and compute:
@@ -188,7 +226,7 @@ def get_adx_and_ath_dd() -> dict:
         r    = requests.get(url, headers=HEADERS, timeout=15)
         q    = r.json()["chart"]["result"][0]["indicators"]["quote"][0]
         highs  = [h for h in q["high"]  if h]
-        lows   = [l for l in q["low"]   if l]
+        lows   = [low for low in q["low"]   if low]
         closes = [c for c in q["close"] if c]
 
         # Use yesterday's confirmed daily close ( script runs before US market open )
@@ -211,11 +249,11 @@ def get_adx_and_ath_dd() -> dict:
 
         tr_list, pdm_list, ndm_list = [], [], []
         for i in range(1, len(closes)):
-            h, l, pc  = highs[i], lows[i], closes[i - 1]
-            ph, pl    = highs[i - 1], lows[i - 1]
-            tr        = max(h - l, abs(h - pc), abs(l - pc))
+            h, low, pc  = highs[i], lows[i], closes[i - 1]
+            ph, pl      = highs[i - 1], lows[i - 1]
+            tr          = max(h - low, abs(h - pc), abs(low - pc))
             up_move   = h - ph
-            down_move = pl - l
+            down_move = pl - low
             tr_list.append(tr)
             pdm_list.append(up_move   if (up_move > down_move and up_move > 0)   else 0)
             ndm_list.append(down_move if (down_move > up_move and down_move > 0) else 0)
@@ -242,14 +280,22 @@ def get_adx_and_ath_dd() -> dict:
             dx_list.append(dx)
 
         adx = None
+        adx_prev = None
         if len(dx_list) >= n:
+            adx_series = []
             adx_val = sum(dx_list[:n]) / n
+            adx_series.append(adx_val)
             for dx in dx_list[n:]:
                 adx_val = (adx_val * (n - 1) + dx) / n
-            adx = round(adx_val, 1)
+                adx_series.append(adx_val)
+            adx = round(adx_series[-1], 1)
+            if len(adx_series) >= 2:
+                adx_prev = round(adx_series[-2], 1)
 
         return {
             "adx":                adx,
+            "adx_prev":           adx_prev,
+            "adx_delta":          round(adx - adx_prev, 1) if (adx is not None and adx_prev is not None) else None,
             "ath_high_315":       round(ath_high, 2),
             "ath_dd_triggered":   ath_dd,
             "current_pct_of_ath": pct_of_ath,
@@ -257,6 +303,24 @@ def get_adx_and_ath_dd() -> dict:
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+def get_tqqq_premarket_gap(prev_close: float | None) -> float | None:
+    """Return pre-market gap % vs previous close. Returns None if unavailable."""
+    if prev_close is None:
+        return None
+    try:
+        url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=TQQQ"
+        r = requests.get(url, headers=HEADERS, timeout=10).json()
+        res = r.get("quoteResponse", {}).get("result", [])
+        if not res:
+            return None
+        pre = res[0].get("preMarketPrice")
+        if pre is None:
+            return None
+        return round((float(pre) - prev_close) / prev_close * 100, 2)
+    except Exception:
+        return None
 
 
 def get_forexfactory_events() -> tuple[list, list, list]:
@@ -349,6 +413,7 @@ def get_big_tech_earnings() -> tuple[list, list]:
 def evaluate_status(
     tqqq: dict,
     vix: float | None,
+    premarket_gap_pct: float | None,
     fomc_events: list,
     macro_events: list,
     usd_holidays: list,
@@ -358,7 +423,7 @@ def evaluate_status(
 ) -> tuple[str, list, str | None]:
     """
     Evaluate all checks and return ( action, flags, pause_until ).
-    Priority: ATH DD > VIX extreme > macro events > earnings > VIX elevated > ADX.
+    Priority: VIX extreme > macro events > earnings > VIX elevated > pre-market gap > ADX.
     """
     flags       = []
     action      = "✅ PROCEED"
@@ -404,6 +469,9 @@ def evaluate_status(
     if tmrw_earnings:
         syms = ", ".join(e["symbol"] for e in tmrw_earnings)
         flags.append(f"🟡 EARNINGS TOMORROW PRE-OPEN: {syms} → If call within $2 of strike, close at open today.")
+        if action == "✅ PROCEED":
+            action      = "⏸️ PAUSE — EARNINGS TOMORROW"
+            pause_until = "Resume next trading day after earnings event."
 
     # VIX checks
     if vix is not None:
@@ -411,25 +479,30 @@ def evaluate_status(
             flags.append(f"🔴 VIX = {vix} ( ≥40 ) — extreme vol")
             action      = "🛑 CLOSE & SIT OUT"
             pause_until = "Resume when VIX drops below 25 for 2 consecutive days."
-        elif vix > 25:
-            flags.append(f"🔴 VIX = {vix} ( >25 ) — above sweet spot")
+        elif vix > 22:
+            flags.append(f"🔴 VIX = {vix} ( >22 ) — above proceed band")
             if action == "✅ PROCEED":
                 action      = "⏸️ PAUSE — HIGH VIX"
-                pause_until = "Resume when VIX drops back into 15–25 range."
+                pause_until = "Resume when VIX drops back into 15–22 range."
         elif vix < 15:
             flags.append(f"🟡 VIX = {vix} ( <15 ) — too calm, premium too thin")
             if action == "✅ PROCEED":
-                action      = "⏸️ SKIP — LOW VIX"
+                action      = "⏸️ PAUSE — LOW VIX"
                 pause_until = "Resume when VIX rises back above 15."
 
-    # ATH DD check ( Phoenix 9Sig rule )
+    # Pre-market gap-up check
+    if premarket_gap_pct is not None and premarket_gap_pct > 4:
+        flags.append(f"🔴 TQQQ PRE-MARKET GAP = +{premarket_gap_pct}% ( >4% ) — gap-up exceeds threshold")
+        if action == "✅ PROCEED":
+            action      = "⏸️ PAUSE — PRE-MARKET GAP-UP"
+            pause_until = "Resume when pre-market gap-up risk normalises."
+
+    # ATH DD display-only notes ( Phoenix 9Sig status )
     if adx_data and "error" not in adx_data:
         if adx_data.get("ath_dd_triggered"):
             pct = adx_data.get("current_pct_of_ath", 0)
             ath = adx_data.get("ath_high_315", 0)
-            flags.append(f"🔴 ATH DD TRIGGERED: TQQQ at {pct}% of 315d high ( ${ath} ) — deep drawdown")
-            action      = "🛑 SKIP — ATH DD WINDOW"
-            pause_until = "Resume when TQQQ closes above 70% of its 315d high. Skip window refreshes daily."
+            flags.append(f"🟡 ATH DD STATUS: TQQQ at {pct}% of 315d high ( ${ath} ) — display only")
         elif adx_data.get("current_pct_of_ath") is not None:
             pct = adx_data["current_pct_of_ath"]
             if pct < 80:
@@ -438,11 +511,20 @@ def evaluate_status(
     # ADX trend strength check
     if adx_data and "error" not in adx_data and adx_data.get("adx") is not None:
         adx = adx_data["adx"]
+        adx_prev = adx_data.get("adx_prev")
+        adx_delta = adx_data.get("adx_delta")
         if adx > 25:
             flags.append(f"🔴 ADX = {adx} ( >25 ) — trending market, covered calls risky")
+            if adx_prev is not None and adx < adx_prev:
+                flags.append(f"🟡 ADX easing ( {adx_prev} → {adx} ) but still >25 — remain paused")
             if action == "✅ PROCEED":
                 action      = "⏸️ PAUSE — TRENDING ( ADX )"
-                pause_until = "Resume when ADX drops below 20 ( range-bound market )."
+                pause_until = "Resume when ADX drops below 25 ( range-bound market )."
+        elif adx_delta is not None and adx_delta > 3:
+            flags.append(f"🔴 ADX rose sharply day-over-day ( {adx_prev} → {adx}, +{adx_delta} ) — trend forming")
+            if action == "✅ PROCEED":
+                action      = "⏸️ PAUSE — ADX RISING SHARPLY"
+                pause_until = "Resume when ADX rise cools and trend risk subsides."
         elif adx > 20:
             flags.append(f"🟡 ADX = {adx} ( 20–25 ) — watch, approaching trend zone")
 
@@ -478,20 +560,31 @@ def build_message(
     date_str = datetime.now(SGT).strftime("%a, %d %b %Y")
     subject  = f"[TQQQ CC] {date_str} | {action}"
 
-    # Strike calculation
+    # Strike & DTE calculation
     if "error" not in tqqq and tqqq.get("price"):
         price = tqqq["price"]
-        # Widen strike on high-risk days
-        if any("EARNINGS" in f and "🔴" in f for f in flags):
-            offset, strike_note = 5, "(widened to +$5 — earnings at open)"
-        elif vix and vix >= 30:
-            offset, strike_note = 5, "(widened to +$5 — high VIX)"
+
+        if vix is not None and 18 <= vix <= 22:
+            offset, strike_note = 3.5, "VIX 18–22 regime ( +$3.5 OTM )"
         else:
-            offset, strike_note = 3, "(normal +$3)"
+            offset, strike_note = 3, "Default ( +$3 OTM )"
         exact_strike = f"${round(price + offset)}"
+
+        dte_target = 7
+        dte_note = "Default weekly cycle ( 7 DTE, closest weekly expiry )"
+        if vix is not None and vix < 16:
+            _, weekly_mid = get_closest_expiry_option_mid(price, dte_target=7, strike_offset=3)
+            if weekly_mid is not None and weekly_mid < 0.20:
+                dte_target = 14
+                dte_note = "Exception: VIX < 16 and 7D +$3 OTM mid < $0.20 → use 14 DTE"
+
+        expiry_label, _ = get_closest_expiry_option_mid(price, dte_target=dte_target, strike_offset=offset)
+        dte_line = expiry_label or f"closest weekly expiry to {dte_target} DTE"
     else:
         exact_strike = "N/A"
         strike_note  = ""
+        dte_note     = ""
+        dte_line     = "N/A"
 
     # Flags block — suppress the all-clear line
     real_flags = [f for f in flags if "clear" not in f.lower()]
@@ -517,10 +610,11 @@ def build_message(
     if not is_paused:
         trade_sections = (
             f"*STRIKE TO USE:*  {exact_strike}  ( {strike_note} )\n"
-            f"*DTE:* closest expiry to 14d\n"
+            f"*DTE:* {dte_line}\n"
+            f"  Rule: {dte_note}\n"
             f"\n"
             f"*IF ROLLING:*\n"
-            f"  ITM → roll to {exact_strike}, same closest-14-DTE expiry\n"
+            f"  ITM → roll to {exact_strike}, same selected weekly expiry\n"
             f"  3+ rolls already → let it ride, no more rolls\n"
             f"  Net roll cost > original premium collected → close the call, don't roll\n"
             f"\n"
@@ -529,9 +623,7 @@ def build_message(
     # Existing position close guidance
     close_guidance = ""
     if "CLOSE" in action or "SIT OUT" in action:
-        if "ATH DD" in action:
-            close_guidance = "*EXISTING POSITION:*\n  Close your call at open today. ATH DD window active — hold shares uncapped.\n\n"
-        elif vix and vix >= 40:
+        if vix and vix >= 40:
             close_guidance = "*EXISTING POSITION:*\n  Close your call at open today. VIX ≥40 — reversal risk too high.\n\n"
     elif any("TOMORROW" in f for f in real_flags) and tqqq.get("price"):
         lo = round(tqqq["price"] - 2)
@@ -572,12 +664,13 @@ def build_message(
         f"{trade_sections}"
         f"{div}\n"
         f"*STRATEGY (ref)*\n"
-        f"  Entry      +$3 OTM | closest to 14d DTE | bi-weekly\n"
-        f"  Roll       Once at open if ITM → new +$3 OTM, same DTE | max 3 rolls/cycle\n"
+        f"  Entry      +$3 OTM default ( +$3.5 at VIX 18–22 ) | closest weekly expiry | weekly\n"
+        f"  DTE rule   7 DTE default | if VIX < 16 and 7D +$3 mid < $0.20, use 14 DTE\n"
+        f"  Roll       Once at open if ITM → new strike per VIX rule, same selected expiry | max 3 rolls/cycle\n"
         f"  Close      DTE 0 at open\n"
-        f"  Proceed    VIX 15–25 | ADX <20 | TQQQ >70% of 315d high\n"
-        f"  Pause      ADX >25 | VIX >25 | FOMC/CPI/NFP day | earnings at open\n"
-        f"  Close CC   VIX ≥40 | ATH DD triggered\n"
+        f"  Proceed    VIX 15–22 | ADX <25\n"
+        f"  Pause      ADX >25 or sharp +3 rise | VIX <15 or >22 | gap-up >4% | FOMC/CPI/NFP day | earnings at/tomorrow open\n"
+        f"  Close CC   VIX ≥40\n"
         f"  Pre-event  Close call if within $2 of strike, day before FOMC/earnings\n"
         f"\n"
         f"{sig9_block}"
@@ -618,16 +711,15 @@ def send_telegram(subject: str, body: str) -> None:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-import time
-
 def fetch_all_data() -> tuple:
-    """Fetch all market data. Returns tuple of ( tqqq, vix, adx_data, fomc, macro, holidays, earnings, tmrw_earnings )."""
+    """Fetch all market data. Returns tuple of ( tqqq, vix, premarket_gap_pct, adx_data, fomc, macro, holidays, earnings, tmrw_earnings )."""
     tqqq                    = get_tqqq_data()
     vix                     = get_vix()
+    premarket_gap_pct       = get_tqqq_premarket_gap(tqqq.get("prev_close") if "error" not in tqqq else None)
     adx_data                = get_adx_and_ath_dd()
     fomc, macro, holidays   = get_forexfactory_events()
     earnings, tmrw_earnings = get_big_tech_earnings()
-    return tqqq, vix, adx_data, fomc, macro, holidays, earnings, tmrw_earnings
+    return tqqq, vix, premarket_gap_pct, adx_data, fomc, macro, holidays, earnings, tmrw_earnings
 
 
 def data_has_errors(tqqq, vix, adx_data) -> list:
@@ -682,11 +774,11 @@ if __name__ == "__main__":
     # Retry schedule: wait 1min, then 15min, then 30min before giving up
     RETRY_DELAYS = [1, 15, 30]  # minutes
     attempt = 0
-    tqqq = vix = adx_data = fomc = macro = holidays = earnings = tmrw_earnings = None
+    tqqq = vix = premarket_gap_pct = adx_data = fomc = macro = holidays = earnings = tmrw_earnings = None
     fomc, macro, holidays, earnings, tmrw_earnings = [], [], [], [], []
 
     while attempt <= len(RETRY_DELAYS):
-        tqqq, vix, adx_data, fomc, macro, holidays, earnings, tmrw_earnings = fetch_all_data()
+        tqqq, vix, premarket_gap_pct, adx_data, fomc, macro, holidays, earnings, tmrw_earnings = fetch_all_data()
         failed = data_has_errors(tqqq, vix, adx_data)
 
         if not failed:
@@ -709,6 +801,7 @@ if __name__ == "__main__":
     # Debug output
     print(f"  TQQQ      : {tqqq}")
     print(f"  VIX       : {vix}")
+    print(f"  PreMktGap : {premarket_gap_pct}")
     print(f"  ADX/ATH   : {adx_data}")
     print(f"  FOMC      : {fomc}")
     print(f"  Macro     : {macro}")
@@ -716,7 +809,7 @@ if __name__ == "__main__":
     print(f"  Earnings  : today={earnings}  tomorrow={tmrw_earnings}")
 
     action, flags, pause_until = evaluate_status(
-        tqqq, vix, fomc, macro, holidays, earnings, tmrw_earnings, adx_data
+        tqqq, vix, premarket_gap_pct, fomc, macro, holidays, earnings, tmrw_earnings, adx_data
     )
     state, change_msg = update_state(action, pause_until, tqqq, vix)
 
