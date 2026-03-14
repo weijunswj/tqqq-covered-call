@@ -126,12 +126,6 @@ Then run via:
 - Scheduled cron ( two UTC cron expressions covering both DST UTC hours ), or
 - **Actions → TQQQ Covered Call Reminder → Run workflow**.
 
-**Temporary 10pm test without touching `main`:**
-1. Create a branch ( e.g. `test-10pm` ).
-2. Open **Actions → TQQQ Covered Call Reminder → Run workflow**.
-3. Choose branch `test-10pm` in the **Use workflow from** selector.
-4. Click **Run workflow** at 10:00pm.
-
 > Note: GitHub `schedule` uses the workflow file from the default branch only, so branch-only scheduled cron is not supported.
 
 GitHub Actions cron is UTC-only ( no America/New_York timezone setting ), so the workflow uses two cron expressions ( one per UTC hour ) plus an ET-time guard; it executes only when local ET time is within **08:30–08:59 America/New_York** ( to tolerate delayed runner starts ).
