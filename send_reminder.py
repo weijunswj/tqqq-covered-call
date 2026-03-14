@@ -503,10 +503,6 @@ def evaluate_status(
             pct = adx_data.get("current_pct_of_ath", 0)
             ath = adx_data.get("ath_high_315", 0)
             flags.append(f"🟡 ATH DD STATUS: TQQQ at {pct}% of 315d high ( ${ath} ) — display only")
-        elif adx_data.get("current_pct_of_ath") is not None:
-            pct = adx_data["current_pct_of_ath"]
-            if pct < 80:
-                flags.append(f"🟡 TQQQ at {pct}% of 315d high ( approaching ATH DD zone at 70% )")
 
     # ADX trend strength check
     if adx_data and "error" not in adx_data and adx_data.get("adx") is not None:
