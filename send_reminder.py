@@ -16,6 +16,7 @@ Configuration:
 import json
 import os
 import sys
+import time
 import requests
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -175,6 +176,42 @@ def get_vix() -> float | None:
         return None
 
 
+def get_closest_expiry_option_mid(price: float, dte_target: int, strike_offset: float) -> tuple[str | None, float | None]:
+    """
+    Fetch the closest listed expiry to `dte_target` and return:
+      ( expiry_label, mid premium for rounded price + strike_offset call ).
+    """
+    try:
+        now_ts = int(datetime.now(ET).timestamp())
+        target_ts = now_ts + dte_target * 24 * 60 * 60
+        chain_url = "https://query2.finance.yahoo.com/v7/finance/options/TQQQ"
+        chain_res = requests.get(chain_url, headers=HEADERS, timeout=10).json()
+        expiries = chain_res.get("optionChain", {}).get("result", [{}])[0].get("expirationDates", [])
+        if not expiries:
+            return None, None
+
+        chosen_expiry = min(expiries, key=lambda ts: abs(ts - target_ts))
+        expiry_dt = datetime.fromtimestamp(chosen_expiry, ET).date()
+        expiry_label = f"{expiry_dt.isoformat()} ( {max((expiry_dt - datetime.now(ET).date()).days, 0)} DTE )"
+
+        opt_url = f"https://query2.finance.yahoo.com/v7/finance/options/TQQQ?date={chosen_expiry}"
+        opt_res = requests.get(opt_url, headers=HEADERS, timeout=10).json()
+        calls = opt_res.get("optionChain", {}).get("result", [{}])[0].get("options", [{}])[0].get("calls", [])
+        if not calls:
+            return expiry_label, None
+
+        target_strike = round(price + strike_offset)
+        best_call = min(calls, key=lambda c: abs(float(c.get("strike", 0)) - target_strike))
+        bid = best_call.get("bid")
+        ask = best_call.get("ask")
+        if bid is None or ask is None:
+            return expiry_label, None
+        mid = round((float(bid) + float(ask)) / 2, 2)
+        return expiry_label, mid
+    except Exception:
+        return None, None
+
+
 def get_adx_and_ath_dd() -> dict:
     """
     Fetch 2 years of TQQQ daily OHLC and compute:
@@ -188,7 +225,7 @@ def get_adx_and_ath_dd() -> dict:
         r    = requests.get(url, headers=HEADERS, timeout=15)
         q    = r.json()["chart"]["result"][0]["indicators"]["quote"][0]
         highs  = [h for h in q["high"]  if h]
-        lows   = [l for l in q["low"]   if l]
+        lows   = [low for low in q["low"]   if low]
         closes = [c for c in q["close"] if c]
 
         # Use yesterday's confirmed daily close ( script runs before US market open )
@@ -211,11 +248,11 @@ def get_adx_and_ath_dd() -> dict:
 
         tr_list, pdm_list, ndm_list = [], [], []
         for i in range(1, len(closes)):
-            h, l, pc  = highs[i], lows[i], closes[i - 1]
-            ph, pl    = highs[i - 1], lows[i - 1]
-            tr        = max(h - l, abs(h - pc), abs(l - pc))
+            h, low, pc  = highs[i], lows[i], closes[i - 1]
+            ph, pl      = highs[i - 1], lows[i - 1]
+            tr          = max(h - low, abs(h - pc), abs(low - pc))
             up_move   = h - ph
-            down_move = pl - l
+            down_move = pl - low
             tr_list.append(tr)
             pdm_list.append(up_move   if (up_move > down_move and up_move > 0)   else 0)
             ndm_list.append(down_move if (down_move > up_move and down_move > 0) else 0)
@@ -358,7 +395,7 @@ def evaluate_status(
 ) -> tuple[str, list, str | None]:
     """
     Evaluate all checks and return ( action, flags, pause_until ).
-    Priority: ATH DD > VIX extreme > macro events > earnings > VIX elevated > ADX.
+    Priority: VIX extreme > macro events > earnings > VIX elevated > ADX.
     """
     flags       = []
     action      = "✅ PROCEED"
@@ -422,14 +459,12 @@ def evaluate_status(
                 action      = "⏸️ SKIP — LOW VIX"
                 pause_until = "Resume when VIX rises back above 15."
 
-    # ATH DD check ( Phoenix 9Sig rule )
+    # ATH DD display-only notes ( Phoenix 9Sig status )
     if adx_data and "error" not in adx_data:
         if adx_data.get("ath_dd_triggered"):
             pct = adx_data.get("current_pct_of_ath", 0)
             ath = adx_data.get("ath_high_315", 0)
-            flags.append(f"🔴 ATH DD TRIGGERED: TQQQ at {pct}% of 315d high ( ${ath} ) — deep drawdown")
-            action      = "🛑 SKIP — ATH DD WINDOW"
-            pause_until = "Resume when TQQQ closes above 70% of its 315d high. Skip window refreshes daily."
+            flags.append(f"🟡 ATH DD STATUS: TQQQ at {pct}% of 315d high ( ${ath} ) — display only")
         elif adx_data.get("current_pct_of_ath") is not None:
             pct = adx_data["current_pct_of_ath"]
             if pct < 80:
@@ -442,7 +477,7 @@ def evaluate_status(
             flags.append(f"🔴 ADX = {adx} ( >25 ) — trending market, covered calls risky")
             if action == "✅ PROCEED":
                 action      = "⏸️ PAUSE — TRENDING ( ADX )"
-                pause_until = "Resume when ADX drops below 20 ( range-bound market )."
+                pause_until = "Resume when ADX drops below 25 ( range-bound market )."
         elif adx > 20:
             flags.append(f"🟡 ADX = {adx} ( 20–25 ) — watch, approaching trend zone")
 
@@ -478,20 +513,31 @@ def build_message(
     date_str = datetime.now(SGT).strftime("%a, %d %b %Y")
     subject  = f"[TQQQ CC] {date_str} | {action}"
 
-    # Strike calculation
+    # Strike & DTE calculation
     if "error" not in tqqq and tqqq.get("price"):
         price = tqqq["price"]
-        # Widen strike on high-risk days
-        if any("EARNINGS" in f and "🔴" in f for f in flags):
-            offset, strike_note = 5, "(widened to +$5 — earnings at open)"
-        elif vix and vix >= 30:
-            offset, strike_note = 5, "(widened to +$5 — high VIX)"
+
+        if vix is not None and 22 <= vix <= 25:
+            offset, strike_note = 3.5, "VIX 22–25 regime ( +$3.5 OTM )"
         else:
-            offset, strike_note = 3, "(normal +$3)"
+            offset, strike_note = 3, "Default ( +$3 OTM )"
         exact_strike = f"${round(price + offset)}"
+
+        dte_target = 7
+        dte_note = "Default weekly cycle ( 7 DTE, closest weekly expiry )"
+        if vix is not None and vix < 16:
+            _, weekly_mid = get_closest_expiry_option_mid(price, dte_target=7, strike_offset=3)
+            if weekly_mid is not None and weekly_mid < 0.20:
+                dte_target = 14
+                dte_note = "Exception: VIX < 16 and 7D +$3 OTM mid < $0.20 → use 14 DTE"
+
+        expiry_label, _ = get_closest_expiry_option_mid(price, dte_target=dte_target, strike_offset=offset)
+        dte_line = expiry_label or f"closest weekly expiry to {dte_target} DTE"
     else:
         exact_strike = "N/A"
         strike_note  = ""
+        dte_note     = ""
+        dte_line     = "N/A"
 
     # Flags block — suppress the all-clear line
     real_flags = [f for f in flags if "clear" not in f.lower()]
@@ -517,10 +563,11 @@ def build_message(
     if not is_paused:
         trade_sections = (
             f"*STRIKE TO USE:*  {exact_strike}  ( {strike_note} )\n"
-            f"*DTE:* closest expiry to 14d\n"
+            f"*DTE:* {dte_line}\n"
+            f"  Rule: {dte_note}\n"
             f"\n"
             f"*IF ROLLING:*\n"
-            f"  ITM → roll to {exact_strike}, same closest-14-DTE expiry\n"
+            f"  ITM → roll to {exact_strike}, same selected weekly expiry\n"
             f"  3+ rolls already → let it ride, no more rolls\n"
             f"  Net roll cost > original premium collected → close the call, don't roll\n"
             f"\n"
@@ -529,9 +576,7 @@ def build_message(
     # Existing position close guidance
     close_guidance = ""
     if "CLOSE" in action or "SIT OUT" in action:
-        if "ATH DD" in action:
-            close_guidance = "*EXISTING POSITION:*\n  Close your call at open today. ATH DD window active — hold shares uncapped.\n\n"
-        elif vix and vix >= 40:
+        if vix and vix >= 40:
             close_guidance = "*EXISTING POSITION:*\n  Close your call at open today. VIX ≥40 — reversal risk too high.\n\n"
     elif any("TOMORROW" in f for f in real_flags) and tqqq.get("price"):
         lo = round(tqqq["price"] - 2)
@@ -572,12 +617,13 @@ def build_message(
         f"{trade_sections}"
         f"{div}\n"
         f"*STRATEGY (ref)*\n"
-        f"  Entry      +$3 OTM | closest to 14d DTE | bi-weekly\n"
-        f"  Roll       Once at open if ITM → new +$3 OTM, same DTE | max 3 rolls/cycle\n"
+        f"  Entry      +$3 OTM default ( +$3.5 at VIX 22–25 ) | closest weekly expiry | weekly\n"
+        f"  DTE rule   7 DTE default | if VIX < 16 and 7D +$3 mid < $0.20, use 14 DTE\n"
+        f"  Roll       Once at open if ITM → new strike per VIX rule, same selected expiry | max 3 rolls/cycle\n"
         f"  Close      DTE 0 at open\n"
-        f"  Proceed    VIX 15–25 | ADX <20 | TQQQ >70% of 315d high\n"
+        f"  Proceed    VIX 15–25 | ADX <25\n"
         f"  Pause      ADX >25 | VIX >25 | FOMC/CPI/NFP day | earnings at open\n"
-        f"  Close CC   VIX ≥40 | ATH DD triggered\n"
+        f"  Close CC   VIX ≥40\n"
         f"  Pre-event  Close call if within $2 of strike, day before FOMC/earnings\n"
         f"\n"
         f"{sig9_block}"
@@ -617,8 +663,6 @@ def send_telegram(subject: str, body: str) -> None:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-import time
 
 def fetch_all_data() -> tuple:
     """Fetch all market data. Returns tuple of ( tqqq, vix, adx_data, fomc, macro, holidays, earnings, tmrw_earnings )."""

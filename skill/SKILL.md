@@ -1,20 +1,21 @@
 ---
 name: tqqq-covered-call
-description: TQQQ covered call income strategy with daily Telegram reminder automation. Use when the user asks about selling covered calls on TQQQ, setting up a daily pre-market options reminder, managing roll decisions, pause/resume conditions, or integrating the Phoenix 9Sig ATH DD rule with a covered call overlay.
+description: TQQQ covered call income strategy with daily Telegram reminder automation. Use when the user asks about selling covered calls on TQQQ, setting up a daily pre-market options reminder, and managing roll/pause decisions with VIX, ADX, and macro-event filters.
 ---
 
 # TQQQ Covered Call Strategy
 
 ## Strategy Overview
 
-Sell **+$3 OTM covered calls** on TQQQ every 2 weeks to generate income. The strategy only works in **range-bound markets** — pause immediately when the market trends.
+Sell **OTM covered calls** on TQQQ every week to generate income. The strategy only works in **range-bound markets** — pause immediately when the market trends.
 
 | Parameter | Value |
 |---|---|
-| Strike | Current price + $3 ( OTM ) |
-| DTE | Closest expiry to 14 days |
-| Cycle | Bi-weekly |
-| Roll | Once at market open if ITM → new +$3 OTM, same DTE |
+| Strike | Default: current price + $3 ( OTM ); if VIX 22–25: +$3.5 ( OTM ) |
+| DTE | Default: closest weekly expiry to 7 DTE |
+| DTE exception | If VIX < 16 and 7 DTE +$3 OTM mid premium < $0.20, use closest expiry to 14 DTE |
+| Cycle | Weekly |
+| Roll | Once at market open if ITM → new strike per VIX rule, same selected expiry |
 | Max rolls/cycle | 3 — then let it ride to expiry |
 | Close | DTE 0 at open |
 
@@ -22,9 +23,8 @@ Sell **+$3 OTM covered calls** on TQQQ every 2 weeks to generate income. The str
 
 ## Entry Conditions ( ALL must be true )
 
-- VIX between 15–25
-- ADX ( 14 ) < 20 — range-bound, no strong trend
-- TQQQ prev daily close > 70% of its 315-day high ( 9Sig ATH DD rule )
+- VIX between 15–25.
+- ADX ( 14 ) < 25 — range-bound, no strong trend.
 
 ---
 
@@ -35,7 +35,6 @@ Sell **+$3 OTM covered calls** on TQQQ every 2 weeks to generate income. The str
 | ADX trending | ADX > 25 | Pause new entries |
 | VIX elevated | VIX > 25 | Pause new entries |
 | VIX extreme | VIX ≥ 40 | Close existing call + sit out |
-| ATH DD triggered | TQQQ prev close < 70% of 315d high | Hard skip — hold shares uncapped |
 | FOMC / Fed event | Today | Skip open |
 | CPI / PCE / NFP | Today | Skip open |
 | Big tech earnings before open | MSFT, AAPL, NVDA, GOOGL, GOOG, META, AMZN, TSLA, AMD, AVGO, NFLX, QCOM | Skip open |
@@ -50,7 +49,6 @@ Sell **+$3 OTM covered calls** on TQQQ every 2 weeks to generate income. The str
 | Bull run / ADX > 25 | TQQQ pulls back ≥ 5% from recent high |
 | VIX 25–40 | VIX drops below 22 for 2 consecutive days |
 | VIX ≥ 40 | VIX drops below 25 for 2 consecutive days |
-| ATH DD triggered | TQQQ prev close recovers above 70% of 315d high |
 | FOMC / macro event | Next trading day |
 | Earnings at open | Next trading day |
 
@@ -59,7 +57,7 @@ Sell **+$3 OTM covered calls** on TQQQ every 2 weeks to generate income. The str
 ## Roll Decision Rules
 
 1. Check at market open only ( once per day ).
-2. If call is ITM → buy back + sell new +$3 OTM call, closest to 14d DTE.
+2. If call is ITM → buy back + sell new call at strike per VIX rule ( +$3 default, +$3.5 at VIX 22–25 ), same selected weekly expiry.
 3. If 3+ rolls already done this cycle → let it ride, no more rolls.
 4. If net roll cost > original premium collected → close the call, don't roll.
 
@@ -81,17 +79,15 @@ Sell **+$3 OTM covered calls** on TQQQ every 2 weeks to generate income. The str
 | Earnings before open | Hold | Close pre-market |
 | VIX 25–40 | Hold, let decay | Roll once then hold |
 | VIX ≥ 40 | Close | Close |
-| ATH DD triggered | Close | Close |
-
 ---
 
-## 9Sig ATH DD Rule ( Phoenix 9Sig Integration )
+## 9Sig Status ( Display Only )
 
-Uses **yesterday's confirmed daily close** ( not intraday price ):
+Still compute and display:
+- ATH DD status.
+- TQQQ prev close as % of 315-day high.
 
-> If TQQQ prev daily close < 70% of the highest daily close over the last 315 trading days → skip selling covered calls.
-
-The 315-day lookback window refreshes daily. Resume only when prev close recovers above 70% threshold. Rationale: a +$3 premium is irrelevant vs a potential 50–100% bounce after a crash — hold shares uncapped.
+This section is **informational only** and does not affect proceed/pause/close decisions.
 
 ---
 
@@ -102,18 +98,18 @@ A fully automated daily Telegram reminder lives at:
 /home/ubuntu/tqqq_reminder/send_reminder.py
 ```
 
-**Auto-checks:** TQQQ prev daily close ( D1 chart ), VIX, ADX ( 14 ), ATH DD status ( 315d lookback ), ForexFactory events ( FOMC / CPI / NFP / holidays ), Nasdaq earnings API ( big tech before open, today + tomorrow ).
+**Auto-checks:** TQQQ prev daily close ( D1 chart ), VIX, ADX ( 14 ), 9Sig status ( 315d lookback, display-only ), ForexFactory events ( FOMC / CPI / NFP / holidays ), Nasdaq earnings API ( big tech before open, today + tomorrow ).
 
-**Output:** Telegram message with today's call, exact strike, roll instructions, pre-event close warning, 9Sig ATH DD status, and pause day counter.
+**Output:** Telegram message with today's call, exact strike, selected weekly DTE, roll instructions, pre-event close warning, 9Sig status, and pause day counter.
 
-**Schedule:** Mon–Fri, 8:30pm SGT ( EDT ) / 9:30pm SGT ( EST ).
+**Schedule:** GitHub Actions handles scheduling ( Mon–Fri, 8:30pm SGT during EDT / 9:30pm SGT during EST ).
 
 ### Setup
 
 1. Create a Telegram bot via [@BotFather](https://t.me/BotFather), get the bot token.
 2. Send the bot any message to register your chat ID.
 3. Update `TELEGRAM_TOKEN` and `TELEGRAM_CHAT` at the top of `send_reminder.py`.
-4. Schedule via Manus scheduler or system cron.
+4. Configure and maintain the GitHub Actions workflow schedule.
 
 ### ADX Calculation Notes
 
