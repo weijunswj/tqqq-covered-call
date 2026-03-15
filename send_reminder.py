@@ -693,27 +693,31 @@ def build_message(
         triggered_date = state.get("ath_dd_triggered_date") if state else None
         resume_date_str = state.get("ath_dd_resume_date") if state else None
 
-        sig9_lines = [
-            "*9SIG STATUS*",
-            "",
-            f"  TQQQ prev close: ${prev_close}  ( {pct}% of 315d high ${ath_high} )",
-        ]
-
         if ath_dd_triggered:
-            sig9_lines[1] = "  ATH DD:  🔴 IN ATH DD WINDOW — clock resetting daily"
+            status_line = "  ATH DD:  🔴 IN ATH DD WINDOW — clock resetting daily"
+            extra_lines = []
             if triggered_date:
-                sig9_lines.append(f"  Last breach: {triggered_date}")
+                extra_lines.append(f"  Last breach: {triggered_date}")
             if resume_date_str:
-                sig9_lines.append(f"  9Sig resume: {resume_date_str}  ( resets tomorrow if still below 70% )")
+                extra_lines.append(f"  9Sig resume: {resume_date_str}  ( resets tomorrow if still below 70% )")
         elif triggered_date and resume_date_str:
             resume_date = date.fromisoformat(resume_date_str)
             days_remaining = trading_days_remaining(datetime.now(ET).date(), resume_date)
-            sig9_lines[1] = "  ATH DD:  🟡 RECOVERED — counting down 126-day pause"
-            sig9_lines.append(f"  Last breach: {triggered_date}")
-            sig9_lines.append(f"  9Sig resume: {resume_date_str}  ( {days_remaining} trading days remaining )")
+            status_line = "  ATH DD:  🟡 RECOVERED — counting down 126-day pause"
+            extra_lines = [
+                f"  Last breach: {triggered_date}",
+                f"  9Sig resume: {resume_date_str}  ( {days_remaining} trading days remaining )",
+            ]
         else:
-            sig9_lines[1] = "  ATH DD:  🟢 NOT in ATH DD window"
+            status_line = "  ATH DD:  🟢 NOT in ATH DD window"
+            extra_lines = []
 
+        sig9_lines = [
+            "*9SIG STATUS*",
+            status_line,
+            f"  TQQQ prev close: ${prev_close}  ( {pct}% of 315d high ${ath_high} )",
+            *extra_lines,
+        ]
         sig9_block = "\n".join(sig9_lines) + "\n"
     else:
         sig9_block = "*9SIG STATUS*\n  ATH DD: data unavailable\n"
