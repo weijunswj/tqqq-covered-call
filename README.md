@@ -130,6 +130,19 @@ Then run via:
 
 GitHub Actions cron is UTC-only ( no America/New_York timezone setting ), so the workflow uses two cron expressions ( one per UTC hour ) plus an ET-time guard; it executes only when local ET time is within **08:30–08:59 America/New_York** ( to tolerate delayed runner starts ).
 
+#### State persistence — BOT_STATE_TOKEN ( required )
+
+Bot state ( pause counters, ATH DD tracking ) is saved across runs via a GitHub Actions Variable called `BOT_STATE_JSON`. The default `GITHUB_TOKEN` does **not** have write access to repo Variables, so you need a fine-grained PAT:
+
+1. Go to **GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens**.
+2. Click **Generate new token**.
+3. Set **Resource owner** to your account, **Repository access** to this repo only.
+4. Under **Permissions → Repository permissions**, set **Variables** to **Read and write**.
+5. Generate and copy the token.
+6. Add it as a repo Secret: **Settings → Secrets and variables → Actions → New repository secret**, name it `BOT_STATE_TOKEN`.
+
+The workflow uses `BOT_STATE_TOKEN` for the Save bot state step. Without it, state resets on every run and the workflow logs a warning.
+
 If you do **not** see `TQQQ Covered Call Reminder` in Actions:
 1. Open a PR that includes `.github/workflows/daily-reminder.yml`.
 2. Merge that PR into your default branch ( `master` / `main` ).
@@ -140,7 +153,7 @@ If you do **not** see `TQQQ Covered Call Reminder` in Actions:
 
 ## State Tracking
 
-Pause state is persisted in `state.json`:
+Pause state and ATH DD tracking are persisted in `state.json`:
 
 ```json
 {
@@ -149,11 +162,18 @@ Pause state is persisted in `state.json`:
   "since": null,
   "days_paused": 0,
   "resume_cond": null,
-  "total_days_paused": 0
+  "total_days_paused": 0,
+  "ath_dd_triggered_date": null,
+  "ath_dd_resume_date": null,
+  "last_run_date": null
 }
 ```
 
-The script auto-updates this file daily. Delete or reset to `{}` to clear state.
+**Locally:** `state.json` is written to disk and gitignored.
+
+**GitHub Actions:** state is saved to and loaded from a repo Variable called `BOT_STATE_JSON` on each run ( requires `BOT_STATE_TOKEN` — see Setup step 5 above ).
+
+To reset state: delete `state.json` locally, or clear the `BOT_STATE_JSON` variable in GitHub → Settings → Variables → Actions.
 
 ---
 
