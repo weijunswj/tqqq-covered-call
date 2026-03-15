@@ -2,6 +2,7 @@ name: TQQQ Covered Call Reminder
 
 permissions:
   contents: read
+  actions: write
 
 on:
   schedule:
@@ -60,6 +61,20 @@ jobs:
             echo "Skipping job: current ET time is $ET_TIME (target window is 08:30-08:59)"
           fi
 
+      - name: Load bot state
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.slot.outputs.should_run == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          STATE=$(gh variable get BOT_STATE_JSON --repo "$REPO" 2>/dev/null || echo "")
+          if [ -n "$STATE" ]; then
+            echo "$STATE" > state.json
+            echo "Loaded state from GitHub Variable."
+          else
+            echo "No existing state found, starting fresh."
+          fi
+
       - name: Run reminder
         if: ${{ github.event_name == 'workflow_dispatch' || steps.slot.outputs.should_run == 'true' }}
         env:
@@ -72,3 +87,17 @@ jobs:
           export TELEGRAM_TOKEN="${TELEGRAM_TOKEN:-$VAR_TELEGRAM_TOKEN}"
           export TELEGRAM_CHAT="${TELEGRAM_CHAT:-$VAR_TELEGRAM_CHAT}"
           python send_reminder.py
+
+      - name: Save bot state
+        if: ${{ always() && (github.event_name == 'workflow_dispatch' || steps.slot.outputs.should_run == 'true') }}
+        env:
+          GH_TOKEN: ${{ secrets.BOT_STATE_TOKEN || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -f state.json ]; then
+            if gh variable set BOT_STATE_JSON --body "$(cat state.json)" --repo "$REPO"; then
+              echo "State saved to GitHub Variable."
+            else
+              echo "::warning::Failed to persist BOT_STATE_JSON ( likely token permission limitation )."
+            fi
+          fi
