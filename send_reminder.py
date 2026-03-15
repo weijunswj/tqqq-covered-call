@@ -68,7 +68,7 @@ BIG_TECH = {
 # ── State Management ───────────────────────────────────────────────────────────
 
 def load_state() -> dict:
-    """Load pause state from disk."""
+    """Load pause state from env ( preferred ) or disk."""
     default_state = {
         "paused":           False,
         "reason":           None,
@@ -81,14 +81,22 @@ def load_state() -> dict:
         "ath_dd_resume_date": None,
     }
 
+    state_sources = []
+    bot_state_json = os.getenv("BOT_STATE_JSON", "").strip()
+    if bot_state_json:
+        state_sources.append(bot_state_json)
+
     if STATE_FILE.exists():
+        state_sources.append(STATE_FILE.read_text())
+
+    for source in state_sources:
         try:
-            loaded = json.loads(STATE_FILE.read_text())
+            loaded = json.loads(source)
             for key, value in default_state.items():
                 loaded.setdefault(key, value)
             return loaded
         except Exception:
-            pass
+            continue
     return default_state
 
 

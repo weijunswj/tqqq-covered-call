@@ -94,7 +94,7 @@ curl "https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates"
 ### 3. Install dependencies
 
 ```bash
-pip install requests pytz python-dotenv
+pip install -r requirements.txt
 ```
 
 ### 4. Test run
