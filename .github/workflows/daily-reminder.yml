@@ -91,10 +91,13 @@ jobs:
       - name: Save bot state
         if: ${{ always() && (github.event_name == 'workflow_dispatch' || steps.slot.outputs.should_run == 'true') }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.BOT_STATE_TOKEN || secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           if [ -f state.json ]; then
-            gh variable set BOT_STATE_JSON --body "$(cat state.json)" --repo "$REPO"
-            echo "State saved to GitHub Variable."
+            if gh variable set BOT_STATE_JSON --body "$(cat state.json)" --repo "$REPO"; then
+              echo "State saved to GitHub Variable."
+            else
+              echo "::warning::Failed to persist BOT_STATE_JSON ( likely token permission limitation )."
+            fi
           fi
