@@ -67,7 +67,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          STATE=$(gh variable get BOT_STATE_JSON --repo "$REPO" 2>/dev/null || echo "")
+          set -euo pipefail
+
+          STATE="$(gh variable get BOT_STATE_JSON --repo "$REPO" 2>/dev/null || echo "")"
           if [ -n "$STATE" ]; then
             echo "$STATE" > state.json
             echo "Loaded state from GitHub Variable."
@@ -94,10 +96,15 @@ jobs:
           GH_TOKEN: ${{ secrets.BOT_STATE_TOKEN || secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          if [ -f state.json ]; then
-            if gh variable set BOT_STATE_JSON --body "$(cat state.json)" --repo "$REPO"; then
-              echo "State saved to GitHub Variable."
-            else
-              echo "::warning::Failed to persist BOT_STATE_JSON ( likely token permission limitation )."
-            fi
+          set -euo pipefail
+          if [ ! -f state.json ]; then
+            echo "No state.json to persist."
+            exit 0
+          fi
+
+          if gh variable set BOT_STATE_JSON --body "$(cat state.json)" --repo "$REPO"; then
+            echo "State saved to GitHub Variable."
+          else
+            echo "::error::Failed to persist BOT_STATE_JSON. Configure secrets.BOT_STATE_TOKEN with variable write permission ( repo administration scope ) or grant equivalent GitHub App permissions."
+            exit 1
           fi
