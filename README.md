@@ -130,7 +130,9 @@ Then run via:
 
 GitHub Actions cron is UTC-only ( no America/New_York timezone setting ), so the workflow uses two cron expressions ( one per UTC hour ) plus an ET-time guard; it executes only when local ET time is within **08:30–08:59 America/New_York** ( to tolerate delayed runner starts ).
 
-#### State persistence — BOT_STATE_TOKEN ( required )
+---
+
+### 6. State persistence — BOT_STATE_TOKEN ( required )
 
 Bot state ( pause counters, ATH DD tracking ) is saved across runs via a GitHub Actions Variable called `BOT_STATE_JSON`. The default `GITHUB_TOKEN` does **not** have write access to repo Variables, so you need a fine-grained PAT:
 
@@ -171,7 +173,7 @@ Pause state and ATH DD tracking are persisted in `state.json`:
 
 **Locally:** `state.json` is written to disk and gitignored.
 
-**GitHub Actions:** state is saved to and loaded from a repo Variable called `BOT_STATE_JSON` on each run ( requires `BOT_STATE_TOKEN` — see Setup step 5 above ).
+**GitHub Actions:** state is saved to and loaded from a repo Variable called `BOT_STATE_JSON` on each run ( requires `BOT_STATE_TOKEN` — see Setup step 6 above ).
 
 To reset state: delete `state.json` locally, or clear the `BOT_STATE_JSON` variable in GitHub → Settings → Variables → Actions.
 
