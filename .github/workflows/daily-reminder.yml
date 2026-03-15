@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pytz python-dotenv
+          pip install -r requirements.txt
 
       - name: Decide whether this slot is today's valid 8:30am ET run
         id: slot
