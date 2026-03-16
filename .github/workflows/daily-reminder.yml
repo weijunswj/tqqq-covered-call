@@ -10,7 +10,7 @@ on:
     - cron: '30 12 * * 1-5'
     - cron: '30 13 * * 1-5'
     # TEMP test run: 22:00 SGT today ( 2026-03-16 ) = 14:00 UTC.
-    - cron: '0 14 16 3 *'
+    - cron: '10 14 * * *'
   workflow_dispatch:
 
 jobs:
