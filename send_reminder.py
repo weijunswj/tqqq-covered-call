@@ -207,11 +207,23 @@ def get_tqqq_data() -> dict:
     try:
         url    = "https://query1.finance.yahoo.com/v8/finance/chart/TQQQ?interval=1d&range=20d"
         r      = requests.get(url, headers=HEADERS, timeout=10)
-        closes = [c for c in r.json()["chart"]["result"][0]["indicators"]["quote"][0]["close"] if c]
-        price      = closes[-1]
-        prev       = closes[-2] if len(closes) >= 2 else None
+        result = r.json()["chart"]["result"][0]
+        closes_raw = result["indicators"]["quote"][0]["close"]
+        timestamps = result["timestamp"]
+
+        bars = [
+            (datetime.fromtimestamp(ts, ET).date(), close)
+            for ts, close in zip(timestamps, closes_raw)
+            if close is not None
+        ]
+        closes = [close for _, close in bars]
+
+        today_et = datetime.now(ET).date()
+        use_prev_bar = bars[-1][0] >= today_et and len(closes) >= 2
+        price = closes[-2] if use_prev_bar else closes[-1]
+        prev = closes[-3] if use_prev_bar and len(closes) >= 3 else (closes[-2] if len(closes) >= 2 else None)
         change_pct = ((price - prev) / prev * 100) if prev else 0
-        ten_day    = ((closes[-1] - closes[-11]) / closes[-11] * 100) if len(closes) >= 11 else None
+        ten_day    = ((price - closes[-11]) / closes[-11] * 100) if len(closes) >= 11 else None
         return {
             "price":          round(price, 2),
             "prev_close":     round(prev, 2) if prev else None,
@@ -280,10 +292,25 @@ def get_adx_and_ath_dd() -> dict:
     try:
         url  = "https://query1.finance.yahoo.com/v8/finance/chart/TQQQ?interval=1d&range=2y"
         r    = requests.get(url, headers=HEADERS, timeout=15)
-        q    = r.json()["chart"]["result"][0]["indicators"]["quote"][0]
-        highs  = [h for h in q["high"]  if h]
-        lows   = [low for low in q["low"]   if low]
-        closes = [c for c in q["close"] if c]
+        result = r.json()["chart"]["result"][0]
+        q = result["indicators"]["quote"][0]
+        timestamps = result["timestamp"]
+
+        bars = [
+            (datetime.fromtimestamp(ts, ET).date(), high, low, close)
+            for ts, high, low, close in zip(timestamps, q["high"], q["low"], q["close"])
+            if high is not None and low is not None and close is not None
+        ]
+        if not bars:
+            raise ValueError("No valid OHLC bars returned for TQQQ")
+
+        today_et = datetime.now(ET).date()
+        if bars[-1][0] >= today_et and len(bars) >= 2:
+            bars = bars[:-1]
+
+        highs = [high for _, high, _, _ in bars]
+        lows = [low for _, _, low, _ in bars]
+        closes = [close for _, _, _, close in bars]
 
         # Use yesterday's confirmed daily close ( script runs before US market open )
         prev_close = closes[-1]
