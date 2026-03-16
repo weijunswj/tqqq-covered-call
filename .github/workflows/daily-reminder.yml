@@ -9,6 +9,8 @@ on:
     # GitHub Actions cron is UTC-only; include both DST variants.
     - cron: '30 12 * * 1-5'
     - cron: '30 13 * * 1-5'
+    # Temp
+    - cron: '10 16 * * *'
   workflow_dispatch:
 
 jobs:
@@ -81,7 +83,9 @@ jobs:
           fi
 
       - name: Run reminder
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.slot.outputs.should_run == 'true' }}
+        #if: ${{ github.event_name == 'workflow_dispatch' || steps.slot.outputs.should_run == 'true' }}
+        #temp
+        if: ${{ true }}
         env:
           # Prefer Secrets; if missing, fall back to Actions Variables.
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
