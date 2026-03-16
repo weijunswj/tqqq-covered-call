@@ -9,8 +9,8 @@ on:
     # GitHub Actions cron is UTC-only; include both DST variants.
     - cron: '30 12 * * 1-5'
     - cron: '30 13 * * 1-5'
-    # TEMP: remove after confirming scheduler fires. 22:10 SGT = 14:10 UTC.
-    - cron: '20 14 * * *'
+    # TEMP: remove after confirming scheduler fires
+    - cron: '40 14 * * *'
   workflow_dispatch:
 
 jobs:
@@ -47,7 +47,7 @@ jobs:
           TARGET_UTC_HOUR="$(python -c "from datetime import datetime; from zoneinfo import ZoneInfo; now_et = datetime.now( ZoneInfo( 'America/New_York' ) ); target_et = now_et.replace( hour=8, minute=30, second=0, microsecond=0 ); print( target_et.astimezone( ZoneInfo( 'UTC' ) ).strftime( '%H' ) )")"
 
           # TEMP START: bypass all slot checks for scheduler test. Remove this block after confirming cron fires.
-          if [[ "$EVENT_NAME" == "schedule" && "${EVENT_SCHEDULE:-}" == "10 14 * * *" ]]; then
+          if [[ "$EVENT_NAME" == "schedule" && "${EVENT_SCHEDULE:-}" == "40 14 * * *" ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             echo "TEMP scheduler test: forcing should_run=true for cron '${EVENT_SCHEDULE}'."
             exit 0
