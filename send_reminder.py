@@ -292,10 +292,25 @@ def get_adx_and_ath_dd() -> dict:
     try:
         url  = "https://query1.finance.yahoo.com/v8/finance/chart/TQQQ?interval=1d&range=2y"
         r    = requests.get(url, headers=HEADERS, timeout=15)
-        q    = r.json()["chart"]["result"][0]["indicators"]["quote"][0]
-        highs  = [h for h in q["high"]  if h]
-        lows   = [low for low in q["low"]   if low]
-        closes = [c for c in q["close"] if c]
+        result = r.json()["chart"]["result"][0]
+        q = result["indicators"]["quote"][0]
+        timestamps = result["timestamp"]
+
+        bars = [
+            (datetime.fromtimestamp(ts, ET).date(), high, low, close)
+            for ts, high, low, close in zip(timestamps, q["high"], q["low"], q["close"])
+            if high is not None and low is not None and close is not None
+        ]
+        if not bars:
+            raise ValueError("No valid OHLC bars returned for TQQQ")
+
+        today_et = datetime.now(ET).date()
+        if bars[-1][0] >= today_et and len(bars) >= 2:
+            bars = bars[:-1]
+
+        highs = [high for _, high, _, _ in bars]
+        lows = [low for _, _, low, _ in bars]
+        closes = [close for _, _, _, close in bars]
 
         # Use yesterday's confirmed daily close ( script runs before US market open )
         prev_close = closes[-1]
