@@ -6,9 +6,8 @@ permissions:
 
 on:
   schedule:
-    # GitHub Actions cron is UTC-only; include both DST variants.
-    - cron: '30 12 * * 1-5'
-    - cron: '30 13 * * 1-5'
+    # TEMP test run: 22:00 SGT today ( 2026-03-16 ) = 14:00 UTC.
+    - cron: '0 14 16 3 *'
   workflow_dispatch:
 
 jobs:
@@ -43,6 +42,13 @@ jobs:
           ET_TOTAL_MINUTES="$(( 10#$ET_HOUR * 60 + ET_MINUTE_INT ))"
 
           TARGET_UTC_HOUR="$(python -c "from datetime import datetime; from zoneinfo import ZoneInfo; now_et = datetime.now( ZoneInfo( 'America/New_York' ) ); target_et = now_et.replace( hour=8, minute=30, second=0, microsecond=0 ); print( target_et.astimezone( ZoneInfo( 'UTC' ) ).strftime( '%H' ) )")"
+
+          # TEMP scheduler test: allow the one-off 22:00 SGT cron to run regardless of 08:30 ET slot checks.
+          if [[ "$EVENT_NAME" == "schedule" && "${EVENT_SCHEDULE:-}" == "0 14 16 3 *" ]]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "Running TEMP scheduler test for schedule '$EVENT_SCHEDULE' (22:00 SGT today)."
+            exit 0
+          fi
 
           if [[ "$EVENT_NAME" == "schedule" && -n "${EVENT_SCHEDULE:-}" ]]; then
             SLOT_UTC_HOUR="$(awk '{print $2}' <<< "$EVENT_SCHEDULE")"
