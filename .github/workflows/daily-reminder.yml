@@ -10,7 +10,7 @@ on:
     - cron: '30 12 * * 1-5'
     - cron: '30 13 * * 1-5'
     # TEMP: remove after confirming scheduler fires. 22:10 SGT = 14:10 UTC.
-    - cron: '10 14 * * *'
+    - cron: '20 14 * * *'
   workflow_dispatch:
 
 jobs:
