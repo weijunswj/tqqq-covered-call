@@ -29,7 +29,7 @@ All core decision logic uses **confirmed daily closes** from Yahoo Finance D1 ba
 | **ATH DD** ( 315d high check ) | Yahoo Finance D1 chart | ✅ Yes |
 | **ADX ( 14 )** | Yahoo Finance D1 chart | ✅ Yes |
 | **VIX** | Yahoo Finance quote | ✅ Yes ( `regularMarketPrice` = prev close pre-market ) |
-| **Pre-market gap** | Yahoo Finance quote | ✅ Intentionally live |
+| **Pre-market gap** | Yahoo Finance quote | ❌ No — uses live pre-market price ( intentional ) |
 
 ---
 
