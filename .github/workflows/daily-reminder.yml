@@ -6,9 +6,8 @@ permissions:
 
 on:
   schedule:
-    # GitHub Actions cron is UTC-only; include both DST variants.
-    - cron: '30 12 * * 1-5'
-    - cron: '30 13 * * 1-5'
+    # TEMP test run: 22:00 SGT today ( 2026-03-16 ) = 14:00 UTC.
+    - cron: '0 14 16 3 *'
   workflow_dispatch:
 
 jobs:
@@ -40,8 +39,16 @@ jobs:
           ET_HOUR="${ET_TIME%:*}"
           ET_MINUTE="${ET_TIME#*:}"
           ET_MINUTE_INT="$((10#$ET_MINUTE))"
+          ET_TOTAL_MINUTES="$(( 10#$ET_HOUR * 60 + ET_MINUTE_INT ))"
 
           TARGET_UTC_HOUR="$(python -c "from datetime import datetime; from zoneinfo import ZoneInfo; now_et = datetime.now( ZoneInfo( 'America/New_York' ) ); target_et = now_et.replace( hour=8, minute=30, second=0, microsecond=0 ); print( target_et.astimezone( ZoneInfo( 'UTC' ) ).strftime( '%H' ) )")"
+
+          # TEMP scheduler test: allow the one-off 22:00 SGT cron to run regardless of 08:30 ET slot checks.
+          if [[ "$EVENT_NAME" == "schedule" && "${EVENT_SCHEDULE:-}" == "0 14 16 3 *" ]]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "Running TEMP scheduler test for schedule '$EVENT_SCHEDULE' (22:00 SGT today)."
+            exit 0
+          fi
 
           if [[ "$EVENT_NAME" == "schedule" && -n "${EVENT_SCHEDULE:-}" ]]; then
             SLOT_UTC_HOUR="$(awk '{print $2}' <<< "$EVENT_SCHEDULE")"
@@ -52,13 +59,15 @@ jobs:
             fi
           fi
 
-          # Allow delayed starts for the intended slot, but only within 08:30-08:59 ET.
-          if [[ "$ET_HOUR" == "08" && "$ET_MINUTE_INT" -ge 30 ]]; then
+          # Allow delayed starts: 08:30–10:00 ET (90-min window).
+          # GitHub Actions schedule can be delayed by 1+ hour during high load.
+          # WINDOW_START=510 = 08:30, WINDOW_END=600 = 10:00
+          if [[ "$ET_TOTAL_MINUTES" -ge 510 && "$ET_TOTAL_MINUTES" -lt 600 ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             echo "Running job: current ET time is $ET_TIME (target UTC hour $TARGET_UTC_HOUR, scheduled slot '$EVENT_SCHEDULE')"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping job: current ET time is $ET_TIME (target window is 08:30-08:59)"
+            echo "Skipping job: current ET time is $ET_TIME (target window is 08:30-10:00 ET)"
           fi
 
       - name: Load bot state
