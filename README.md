@@ -19,21 +19,17 @@ Runs Mon–Fri before US market open. Fetches live data, evaluates conditions, a
 
 ---
 
-## Checks Performed
+## Data Source Audit
 
-| Check | Source |
-|---|---|
-| TQQQ prev daily close ( D1 ) | Yahoo Finance |
-| VIX level | Yahoo Finance |
-| ADX ( 14 ) — trend strength | Yahoo Finance ( computed ) |
-| 9Sig status ( ATH DD + % of 315d high ) | Yahoo Finance ( computed ) |
-| FOMC / Fed events | ForexFactory JSON API |
-| CPI / PCE / NFP today | ForexFactory JSON API |
-| US market holidays | ForexFactory JSON API |
-| Big tech earnings before open ( today + tomorrow ) | Nasdaq earnings API |
-| TQQQ pre-market gap ( vs previous close ) | Yahoo Finance quote API |
+All core decision logic uses **confirmed daily closes** from Yahoo Finance D1 bars. No intraday prices are used for ADX, ATH DD, or strike calculation. The only live data point is the pre-market gap check, which is intentionally live.
 
-**Big tech watchlist:** MSFT, AAPL, NVDA, GOOGL, GOOG, META, AMZN, TSLA, AMD, AVGO, NFLX, QCOM.
+| Data Point | Source | Uses Yesterday Close? |
+|---|---|---|
+| **TQQQ price** ( for strike calc ) | Yahoo Finance D1 chart | ✅ Yes |
+| **ATH DD** ( 315d high check ) | Yahoo Finance D1 chart | ✅ Yes |
+| **ADX ( 14 )** | Yahoo Finance D1 chart | ✅ Yes |
+| **VIX** | Yahoo Finance quote | ✅ Yes ( `regularMarketPrice` = prev close pre-market ) |
+| **Pre-market gap** | Yahoo Finance quote | ✅ Intentionally live |
 
 ---
 
@@ -85,12 +81,6 @@ TELEGRAM_TOKEN=123456789:ABCdef...
 TELEGRAM_CHAT=123456789
 ```
 
-To fetch your chat ID automatically:
-
-```bash
-curl "https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates"
-```
-
 ### 3. Install dependencies
 
 ```bash
@@ -99,36 +89,41 @@ pip install -r requirements.txt
 
 ### 4. Test run
 
-Normal send:
-
 ```bash
 python send_reminder.py
-```
 
-Dry-run ( builds and prints message but does not send to Telegram ):
-
-```bash
+# Dry-run ( prints message, no send )
 DRY_RUN=1 python send_reminder.py
 ```
 
-### 5. Schedule ( GitHub Actions )
+### 5. Schedule
 
-A workflow is included at `.github/workflows/daily-reminder.yml`.
+#### ⚠️ GitHub Actions Scheduler Warning
 
-Credential sources ( either works ):
-- **Recommended:** repo **Secrets** ( `TELEGRAM_TOKEN`, `TELEGRAM_CHAT` ).
-- **Also supported:** repo **Variables** with the same names.
+The GitHub Actions `schedule` trigger is **not reliable** for time-sensitive tasks. It is [officially documented as best-effort](https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#schedule) and can be delayed by 5–60+ minutes, or sometimes not fire at all, especially on repos with low activity. For a daily trading reminder, this is a significant risk.
 
-Path in GitHub UI:
-- **Settings → Secrets and variables → Actions**.
+To mitigate this, the workflow's ET-time guard has been widened to **08:30–10:00 ET** (a 90-minute window) to tolerate most delays. However, for guaranteed execution, a more reliable scheduler is recommended.
 
-Then run via:
-- Scheduled cron ( two UTC cron expressions covering both DST UTC hours ), or
-- **Actions → TQQQ Covered Call Reminder → Run workflow**.
+#### Recommended Schedulers
 
-> Note: GitHub `schedule` uses the workflow file from the default branch only, so branch-only scheduled cron is not supported.
+| Option | Reliability | Setup |
+|---|---|---|
+| **Manus Scheduler** | ✅ High | `manus schedule` CLI | 
+| **Render.com Cron Job** | ✅ High | Free tier available | 
+| **Railway Cron** | ✅ High | Free tier available |
+| **GitHub Actions `schedule`** | ⚠️ Low ( best-effort ) | Included in repo |
 
-GitHub Actions cron is UTC-only ( no America/New_York timezone setting ), so the workflow uses two cron expressions ( one per UTC hour ) plus an ET-time guard; it executes only when local ET time is within **08:30–08:59 America/New_York** ( to tolerate delayed runner starts ).
+To use an external scheduler, trigger the workflow via `workflow_dispatch`:
+
+```bash
+# Example: trigger via gh CLI
+gh workflow run daily-reminder.yml --repo <owner>/<repo>
+```
+
+#### GitHub Actions Setup ( if used )
+
+1. Add `TELEGRAM_TOKEN` and `TELEGRAM_CHAT` as repo **Secrets** under **Settings → Secrets and variables → Actions**.
+2. The workflow will now run on its schedule or can be triggered manually via **Actions → TQQQ Covered Call Reminder → Run workflow**.
 
 ### 6. State persistence — BOT_STATE_TOKEN ( required )
 
@@ -140,40 +135,6 @@ Bot state ( pause counters, ATH DD tracking ) is saved across runs via a GitHub 
 4. Under **Permissions → Repository permissions**, set **Variables** to **Read and write**.
 5. Generate and copy the token.
 6. Add it as a repo Secret: **Settings → Secrets and variables → Actions → New repository secret**, name it `BOT_STATE_TOKEN`.
-
-The workflow uses `BOT_STATE_TOKEN` for the Save bot state step. Without it, state resets on every run and the workflow logs a warning.
-
-If you do **not** see `TQQQ Covered Call Reminder` in Actions:
-1. Open a PR that includes `.github/workflows/daily-reminder.yml`.
-2. Merge that PR into your default branch ( `master` / `main` ).
-3. Ensure Actions are enabled for the repo / org.
-4. Refresh Actions page.
-
----
-
-## State Tracking
-
-Pause state and ATH DD tracking are persisted in `state.json`:
-
-```json
-{
-  "paused": false,
-  "reason": null,
-  "since": null,
-  "days_paused": 0,
-  "resume_cond": null,
-  "total_days_paused": 0,
-  "ath_dd_triggered_date": null,
-  "ath_dd_resume_date": null,
-  "last_run_date": null
-}
-```
-
-**Locally:** `state.json` is written to disk and gitignored.
-
-**GitHub Actions:** state is saved to and loaded from a repo Variable called `BOT_STATE_JSON` on each run ( requires `BOT_STATE_TOKEN` — see Setup step 6 above ).
-
-To reset state: delete `state.json` locally, or clear the `BOT_STATE_JSON` variable in GitHub → Settings → Variables → Actions.
 
 ---
 
@@ -188,4 +149,5 @@ tqqq-covered-call/
     ├── SKILL.md              ← Strategy skill.
     └── references/
         └── 9sig-rules.md     ← Full Phoenix 9Sig™ strategy rules.
+```
 ```
