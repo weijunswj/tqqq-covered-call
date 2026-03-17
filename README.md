@@ -12,6 +12,7 @@ Runs Mon–Fri before US market open. Fetches live data, evaluates conditions, a
 - **Exact strike to use** ( dynamic % OTM rule, scaled to current price ).
 - **Selected expiry / DTE rule** ( weekly 7 DTE default, with low-vol exception ).
 - **Roll instructions** if you have an open position.
+- **9Sig status** — ATH DD status and % of 315d high ( display-only ).
 - **Pre-event close warning** if FOMC or big tech earnings are tomorrow.
 - **Pre-market gap protection** ( pauses new entries if gap-up exceeds threshold ).
 - **Pause day counter** — current streak + all-time total.
@@ -20,11 +21,12 @@ Runs Mon–Fri before US market open. Fetches live data, evaluates conditions, a
 
 ## Data Source Audit
 
-All core decision logic uses **confirmed daily closes** from Yahoo Finance D1 bars. No intraday prices are used for ADX or strike calculation. The only live data point is the pre-market gap check, which is intentionally live.
+All core decision logic uses **confirmed daily closes** from Yahoo Finance D1 bars. No intraday prices are used for ADX, ATH DD, or strike calculation. The only live data point is the pre-market gap check, which is intentionally live.
 
 | Data Point | Source | Uses Yesterday Close? |
 |---|---|---|
 | **TQQQ price** ( for strike calc ) | Yahoo Finance D1 chart | ✅ Yes |
+| **ATH DD** ( 315d high check ) | Yahoo Finance D1 chart | ✅ Yes |
 | **ADX ( 14 )** | Yahoo Finance D1 chart | ✅ Yes |
 | **VIX** | Yahoo Finance quote | ✅ Yes ( `regularMarketPrice` = prev close pre-market ) |
 | **Pre-market gap** | Yahoo Finance quote | ❌ No — uses live pre-market price ( intentional ) |
@@ -53,6 +55,8 @@ All core decision logic uses **confirmed daily closes** from Yahoo Finance D1 ba
 **Close existing call:** VIX ≥ 40.
 
 **Pre-event:** Close call if within $2 of strike, day before FOMC / earnings.
+
+> 9Sig ATH DD status is displayed for context only — it does **not** drive any proceed/pause/close decisions for the covered call strategy.
 
 ---
 
