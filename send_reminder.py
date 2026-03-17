@@ -81,6 +81,27 @@ def load_state() -> dict:
         "ath_dd_resume_date": None,
     }
 
+    def normalise_state(raw_state: dict) -> dict:
+        """Fill missing keys so state shape stays stable across sources."""
+        for key, value in default_state.items():
+            raw_state.setdefault(key, value)
+        return raw_state
+
+    def state_sort_key(candidate: dict) -> tuple:
+        """Prefer the most recent and most complete persisted state."""
+        last_run = candidate.get("last_run_date")
+        try:
+            last_run_date = date.fromisoformat(last_run) if last_run else date.min
+        except Exception:
+            last_run_date = date.min
+
+        return (
+            last_run_date,
+            int(bool(candidate.get("paused"))),
+            int(candidate.get("days_paused", 0) or 0),
+            int(candidate.get("total_days_paused", 0) or 0),
+        )
+
     state_sources = []
     bot_state_json = os.getenv("BOT_STATE_JSON", "").strip()
     if bot_state_json:
@@ -89,19 +110,35 @@ def load_state() -> dict:
     if STATE_FILE.exists():
         state_sources.append(STATE_FILE.read_text())
 
+    candidates = []
     for source in state_sources:
         try:
             loaded = json.loads(source)
-            for key, value in default_state.items():
-                loaded.setdefault(key, value)
-            return loaded
+            if isinstance(loaded, dict):
+                candidates.append(normalise_state(loaded))
         except Exception:
             continue
+
+    if candidates:
+        return max(candidates, key=state_sort_key)
+
     return default_state
 
 
 def save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, indent=2))
+
+
+def paused_days_since(since_str: str | None, today_str: str) -> int:
+    """Return inclusive calendar days paused, anchored to the pause start date."""
+    if not since_str:
+        return 1
+    try:
+        since_date = date.fromisoformat(since_str)
+        today_date = date.fromisoformat(today_str)
+        return max(1, (today_date - since_date).days + 1)
+    except Exception:
+        return 1
 
 
 def update_state(action: str, pause_until: str | None, tqqq: dict, vix: float | None) -> tuple[dict, str]:
@@ -132,8 +169,8 @@ def update_state(action: str, pause_until: str | None, tqqq: dict, vix: float | 
                 state["total_days_paused"] = state.get("total_days_paused", 0) + 1
             change_msg = f"⏸️ PAUSE STARTED today. Reason: {action}"
         else:
+            state["days_paused"] = paused_days_since(state.get("since"), today_str)
             if not already_ran_today:
-                state["days_paused"]       = state.get("days_paused", 1) + 1
                 state["total_days_paused"] = state.get("total_days_paused", 0) + 1
             state["reason"]            = action
             state["resume_cond"]       = pause_until or state.get("resume_cond", "")
