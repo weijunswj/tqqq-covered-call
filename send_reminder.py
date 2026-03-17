@@ -580,13 +580,6 @@ def evaluate_status(
             action      = "⏸️ PAUSE — PRE-MARKET GAP-UP"
             pause_until = "Resume when pre-market gap-up risk normalises."
 
-    # ATH DD display-only notes ( Phoenix 9Sig status )
-    if adx_data and "error" not in adx_data:
-        if adx_data.get("ath_dd_triggered"):
-            pct = adx_data.get("current_pct_of_ath", 0)
-            ath = adx_data.get("ath_high_315", 0)
-            flags.append(f"🟡 ATH DD STATUS: TQQQ at {pct}% of 315d high ( ${ath} ) — display only")
-
     # ADX trend strength check
     if adx_data and "error" not in adx_data and adx_data.get("adx") is not None:
         adx = adx_data["adx"]
@@ -644,18 +637,21 @@ def build_message(
         price = tqqq["price"]
 
         if vix is not None and 18 <= vix <= 22:
-            offset, strike_note = 3.5, "VIX 18–22 regime ( +$3.5 OTM )"
+            pct, strike_note = 0.07, "VIX 18–22 regime ( ~7% OTM )"
         else:
-            offset, strike_note = 3, "Default ( +$3 OTM )"
-        exact_strike = f"${round(price + offset)}"
+            pct, strike_note = 0.06, "Default ( ~6% OTM )"
+        raw_strike = price * (1 + pct)
+        strike_rounded = round(raw_strike * 2) / 2
+        exact_strike = f"${strike_rounded:.2f}"
+        offset = strike_rounded - price
 
         dte_target = 7
         dte_note = "Default weekly cycle ( 7 DTE, closest weekly expiry )"
         if vix is not None and vix < 16:
-            _, weekly_mid = get_closest_expiry_option_mid(price, dte_target=7, strike_offset=3)
+            _, weekly_mid = get_closest_expiry_option_mid(price, dte_target=7, strike_offset=offset)
             if weekly_mid is not None and weekly_mid < 0.20:
                 dte_target = 14
-                dte_note = "Exception: VIX < 16 and 7D +$3 OTM mid < $0.20 → use 14 DTE"
+                dte_note = "Exception: VIX < 16 and 7D ~6% OTM mid < $0.20 → use 14 DTE"
 
         expiry_label, _ = get_closest_expiry_option_mid(price, dte_target=dte_target, strike_offset=offset)
         dte_line = expiry_label or f"closest weekly expiry to {dte_target} DTE"
@@ -719,7 +715,7 @@ def build_message(
             f"  If strike > ${hi}, let it ride.\n\n"
         )
 
-    # 9Sig status block
+    # 9Sig status block — display only, does not affect CC decisions
     if adx_data and "error" not in adx_data:
         pct        = adx_data.get("current_pct_of_ath", "N/A")
         ath_high   = adx_data.get("ath_high_315", "N/A")
@@ -768,8 +764,8 @@ def build_message(
         f"{trade_sections}"
         f"{div}\n"
         f"*STRATEGY (ref)*\n"
-        f"  Entry      +$3 OTM default ( +$3.5 at VIX 18–22 ) | closest weekly expiry | weekly\n"
-        f"  DTE rule   7 DTE default | if VIX < 16 and 7D +$3 mid < $0.20, use 14 DTE\n"
+        f"  Entry      ~6% OTM default ( ~7% at VIX 18–22 ) | closest weekly expiry | weekly\n"
+        f"  DTE rule   7 DTE default | if VIX < 16 and 7D ~6% OTM mid < $0.20, use 14 DTE\n"
         f"  Roll       Once at open if ITM → new strike per VIX rule, same selected expiry | max 3 rolls/cycle\n"
         f"  Close      DTE 0 at open\n"
         f"  Proceed    VIX 15–22 | ADX <25\n"
