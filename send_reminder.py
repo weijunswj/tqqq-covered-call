@@ -18,12 +18,11 @@ import os
 import sys
 import time
 import requests
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytz
 from dotenv import load_dotenv
-from pandas_market_calendars import get_calendar
 
 # ── Load config from .env ──────────────────────────────────────────────────────
 load_dotenv(Path(__file__).parent / ".env")
@@ -77,8 +76,6 @@ def load_state() -> dict:
         "resume_cond":      None,
         "total_days_paused": 0,
         "last_run_date":    None,
-        "ath_dd_triggered_date": None,
-        "ath_dd_resume_date": None,
     }
 
     state_sources = []
@@ -155,46 +152,6 @@ def update_state(action: str, pause_until: str | None, tqqq: dict, vix: float | 
     state["last_run_date"] = today_str
     save_state(state)
     return state, change_msg
-
-
-def update_ath_dd_state(state: dict, adx_data: dict) -> dict:
-    """Track ATH DD pause window state for message display."""
-    if not adx_data or "error" in adx_data:
-        return state
-
-    nyse = get_calendar("NYSE")
-    today_et = datetime.now(ET).date()
-    ath_dd_triggered = adx_data.get("ath_dd_triggered", False)
-
-    if ath_dd_triggered:
-        state["ath_dd_triggered_date"] = today_et.isoformat()
-        schedule = nyse.schedule(
-            start_date=today_et,
-            end_date=today_et + timedelta(days=220),
-        )
-        if len(schedule.index) <= 126:
-            schedule = nyse.schedule(
-                start_date=today_et,
-                end_date=today_et + timedelta(days=420),
-            )
-        state["ath_dd_resume_date"] = schedule.index[126].date().isoformat()
-    else:
-        if state.get("ath_dd_triggered_date") is not None and state.get("ath_dd_resume_date"):
-            resume_date = date.fromisoformat(state["ath_dd_resume_date"])
-            if today_et >= resume_date:
-                state["ath_dd_triggered_date"] = None
-                state["ath_dd_resume_date"] = None
-
-    return state
-
-
-def trading_days_remaining(from_date: date, to_date: date) -> int:
-    """Return number of NYSE trading days from from_date up to ( not including ) to_date."""
-    nyse = get_calendar("NYSE")
-    if to_date <= from_date:
-        return 0
-    schedule = nyse.schedule(start_date=from_date, end_date=to_date - timedelta(days=1))
-    return max(len(schedule), 0)
 
 
 # ── Data Fetchers ──────────────────────────────────────────────────────────────
@@ -580,13 +537,6 @@ def evaluate_status(
             action      = "⏸️ PAUSE — PRE-MARKET GAP-UP"
             pause_until = "Resume when pre-market gap-up risk normalises."
 
-    # ATH DD display-only notes ( Phoenix 9Sig status )
-    if adx_data and "error" not in adx_data:
-        if adx_data.get("ath_dd_triggered"):
-            pct = adx_data.get("current_pct_of_ath", 0)
-            ath = adx_data.get("ath_high_315", 0)
-            flags.append(f"🟡 ATH DD STATUS: TQQQ at {pct}% of 315d high ( ${ath} ) — display only")
-
     # ADX trend strength check
     if adx_data and "error" not in adx_data and adx_data.get("adx") is not None:
         adx = adx_data["adx"]
@@ -644,18 +594,21 @@ def build_message(
         price = tqqq["price"]
 
         if vix is not None and 18 <= vix <= 22:
-            offset, strike_note = 3.5, "VIX 18–22 regime ( +$3.5 OTM )"
+            pct, strike_note = 0.07, "VIX 18–22 regime ( ~7% OTM )"
         else:
-            offset, strike_note = 3, "Default ( +$3 OTM )"
-        exact_strike = f"${round(price + offset)}"
+            pct, strike_note = 0.06, "Default ( ~6% OTM )"
+        raw_strike = price * (1 + pct)
+        strike_rounded = round(raw_strike * 2) / 2
+        exact_strike = f"${strike_rounded:.2f}"
+        offset = strike_rounded - price
 
         dte_target = 7
         dte_note = "Default weekly cycle ( 7 DTE, closest weekly expiry )"
         if vix is not None and vix < 16:
-            _, weekly_mid = get_closest_expiry_option_mid(price, dte_target=7, strike_offset=3)
+            _, weekly_mid = get_closest_expiry_option_mid(price, dte_target=7, strike_offset=offset)
             if weekly_mid is not None and weekly_mid < 0.20:
                 dte_target = 14
-                dte_note = "Exception: VIX < 16 and 7D +$3 OTM mid < $0.20 → use 14 DTE"
+                dte_note = "Exception: VIX < 16 and 7D ~6% OTM mid < $0.20 → use 14 DTE"
 
         expiry_label, _ = get_closest_expiry_option_mid(price, dte_target=dte_target, strike_offset=offset)
         dte_line = expiry_label or f"closest weekly expiry to {dte_target} DTE"
@@ -719,44 +672,6 @@ def build_message(
             f"  If strike > ${hi}, let it ride.\n\n"
         )
 
-    # 9Sig status block
-    if adx_data and "error" not in adx_data:
-        pct        = adx_data.get("current_pct_of_ath", "N/A")
-        ath_high   = adx_data.get("ath_high_315", "N/A")
-        prev_close = adx_data.get("prev_close", "N/A")
-        ath_dd_triggered = adx_data.get("ath_dd_triggered", False)
-        triggered_date = state.get("ath_dd_triggered_date") if state else None
-        resume_date_str = state.get("ath_dd_resume_date") if state else None
-
-        if ath_dd_triggered:
-            status_line = "  ATH DD:  🔴 IN ATH DD WINDOW — clock resetting daily"
-            extra_lines = []
-            if triggered_date:
-                extra_lines.append(f"  Last breach: {triggered_date}")
-            if resume_date_str:
-                extra_lines.append(f"  9Sig resume: {resume_date_str}  ( resets tomorrow if still below 70% )")
-        elif triggered_date and resume_date_str:
-            resume_date = date.fromisoformat(resume_date_str)
-            days_remaining = trading_days_remaining(datetime.now(ET).date(), resume_date)
-            status_line = "  ATH DD:  🟡 RECOVERED — counting down 126-day pause"
-            extra_lines = [
-                f"  Last breach: {triggered_date}",
-                f"  9Sig resume: {resume_date_str}  ( {days_remaining} trading days remaining )",
-            ]
-        else:
-            status_line = "  ATH DD:  🟢 NOT in ATH DD window"
-            extra_lines = []
-
-        sig9_lines = [
-            "*9SIG STATUS*",
-            status_line,
-            f"  TQQQ prev close: ${prev_close}  ( {pct}% of 315d high ${ath_high} )",
-            *extra_lines,
-        ]
-        sig9_block = "\n".join(sig9_lines) + "\n"
-    else:
-        sig9_block = "*9SIG STATUS*\n  ATH DD: data unavailable\n"
-
     div  = "─" * 35
     body = (
         f"{div}\n"
@@ -768,8 +683,8 @@ def build_message(
         f"{trade_sections}"
         f"{div}\n"
         f"*STRATEGY (ref)*\n"
-        f"  Entry      +$3 OTM default ( +$3.5 at VIX 18–22 ) | closest weekly expiry | weekly\n"
-        f"  DTE rule   7 DTE default | if VIX < 16 and 7D +$3 mid < $0.20, use 14 DTE\n"
+        f"  Entry      ~6% OTM default ( ~7% at VIX 18–22 ) | closest weekly expiry | weekly\n"
+        f"  DTE rule   7 DTE default | if VIX < 16 and 7D ~6% OTM mid < $0.20, use 14 DTE\n"
         f"  Roll       Once at open if ITM → new strike per VIX rule, same selected expiry | max 3 rolls/cycle\n"
         f"  Close      DTE 0 at open\n"
         f"  Proceed    VIX 15–22 | ADX <25\n"
@@ -777,7 +692,6 @@ def build_message(
         f"  Close CC   VIX ≥40\n"
         f"  Pre-event  Close call if within $2 of strike, day before FOMC/earnings\n"
         f"\n"
-        f"{sig9_block}"
         f"{div}"
     )
 
@@ -915,7 +829,6 @@ if __name__ == "__main__":
         tqqq, vix, premarket_gap_pct, fomc, macro, holidays, earnings, tmrw_earnings, adx_data
     )
     state, change_msg = update_state(action, pause_until, tqqq, vix)
-    state = update_ath_dd_state(state, adx_data)
     save_state(state)
 
     print(f"  Decision  : {action}")
