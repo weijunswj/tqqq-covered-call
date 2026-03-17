@@ -9,24 +9,22 @@ Automated daily pre-market Telegram reminder for a TQQQ covered call income stra
 Runs Mon–Fri before US market open. Fetches live data, evaluates conditions, and sends a Telegram message with:
 
 - **Today's call** — PROCEED / PAUSE / SKIP / CLOSE & SIT OUT.
-- **Exact strike to use** ( dynamic +$3 / +$3.5 OTM rule ).
+- **Exact strike to use** ( dynamic % OTM rule, scaled to current price ).
 - **Selected expiry / DTE rule** ( weekly 7 DTE default, with low-vol exception ).
 - **Roll instructions** if you have an open position.
 - **Pre-event close warning** if FOMC or big tech earnings are tomorrow.
 - **Pre-market gap protection** ( pauses new entries if gap-up exceeds threshold ).
-- **9Sig status** — ATH DD status and % of 315d high ( display-only ).
 - **Pause day counter** — current streak + all-time total.
 
 ---
 
 ## Data Source Audit
 
-All core decision logic uses **confirmed daily closes** from Yahoo Finance D1 bars. No intraday prices are used for ADX, ATH DD, or strike calculation. The only live data point is the pre-market gap check, which is intentionally live.
+All core decision logic uses **confirmed daily closes** from Yahoo Finance D1 bars. No intraday prices are used for ADX or strike calculation. The only live data point is the pre-market gap check, which is intentionally live.
 
 | Data Point | Source | Uses Yesterday Close? |
 |---|---|---|
 | **TQQQ price** ( for strike calc ) | Yahoo Finance D1 chart | ✅ Yes |
-| **ATH DD** ( 315d high check ) | Yahoo Finance D1 chart | ✅ Yes |
 | **ADX ( 14 )** | Yahoo Finance D1 chart | ✅ Yes |
 | **VIX** | Yahoo Finance quote | ✅ Yes ( `regularMarketPrice` = prev close pre-market ) |
 | **Pre-market gap** | Yahoo Finance quote | ❌ No — uses live pre-market price ( intentional ) |
@@ -37,13 +35,16 @@ All core decision logic uses **confirmed daily closes** from Yahoo Finance D1 ba
 
 | Parameter | Value |
 |---|---|
-| Strike | Default: +$3 OTM ( current price + $3 ); if VIX 18–22: +$3.5 OTM |
+| Strike | ~6% OTM: `round( prev_close × 1.06, nearest $0.50 )` |
+| Strike ( VIX 18–22 ) | ~7% OTM: `round( prev_close × 1.07, nearest $0.50 )` |
 | DTE | Default: closest weekly expiry to 7 DTE |
-| DTE exception | If VIX < 16 **and** 7 DTE +$3 OTM mid premium < $0.20, use closest expiry to 14 DTE |
+| DTE exception | If VIX < 16 **and** 7 DTE ~6% OTM mid premium < $0.20, use closest expiry to 14 DTE |
 | Cycle | Weekly |
-| Roll | Once at open if ITM → new strike per VIX rule, same selected expiry |
+| Roll | Once at open if ITM → new ~6% OTM strike ( or ~7% if VIX 18–22 ), same selected expiry |
 | Max rolls/cycle | 3 — then let it ride |
 | Close | DTE 0 at open |
+
+**Why % OTM instead of a fixed dollar offset:** A fixed $3 OTM becomes proportionally larger or smaller as TQQQ drifts over time due to 3x leverage volatility decay. A % target keeps the premium/risk profile consistent regardless of where TQQQ is trading.
 
 **Proceed when:** VIX 15–22 · ADX < 25 and not rising sharply.
 
@@ -52,8 +53,6 @@ All core decision logic uses **confirmed daily closes** from Yahoo Finance D1 ba
 **Close existing call:** VIX ≥ 40.
 
 **Pre-event:** Close call if within $2 of strike, day before FOMC / earnings.
-
-> 9Sig ATH DD status is still displayed for context, but does not drive proceed/pause/close decisions.
 
 ---
 
@@ -127,7 +126,7 @@ gh workflow run daily-reminder.yml --repo <owner>/<repo>
 
 ### 6. State persistence — BOT_STATE_TOKEN ( required )
 
-Bot state ( pause counters, ATH DD tracking ) is saved across runs via a GitHub Actions Variable called `BOT_STATE_JSON`. The default `GITHUB_TOKEN` does **not** have write access to repo Variables, so you need a fine-grained PAT:
+Bot state ( pause counters ) is saved across runs via a GitHub Actions Variable called `BOT_STATE_JSON`. The default `GITHUB_TOKEN` does **not** have write access to repo Variables, so you need a fine-grained PAT:
 
 1. Go to **GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens**.
 2. Click **Generate new token**.
@@ -146,8 +145,6 @@ tqqq-covered-call/
 ├── state.json                ← Auto-managed pause state.
 ├── README.md                 ← This file.
 └── skill/
-    ├── SKILL.md              ← Strategy skill.
     └── references/
         └── 9sig-rules.md     ← Full Phoenix 9Sig™ strategy rules.
-```
 ```
