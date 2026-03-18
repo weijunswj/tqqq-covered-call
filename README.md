@@ -139,38 +139,6 @@ Bot state ( pause counters ) is saved across runs via a GitHub Actions Variable 
 5. Generate and copy the token.
 6. Add it as a repo Secret: **Settings → Secrets and variables → Actions → New repository secret**, name it `BOT_STATE_TOKEN`.
 
-> ⚠️ **Critical:** `BOT_STATE_TOKEN` must be set for **both** the Load and Save steps to work. Without it, the Load step silently falls back to `GITHUB_TOKEN` which cannot read repo Variables — causing state to reset on every run ( `since` resets to today, `days_paused` and `total_days_paused` stuck at 1 ).
-
----
-
-## Troubleshooting
-
-### Pause state resets every day ( `since` = today, `days_paused` = 1, `total_days_paused` = 1 )
-
-**Root cause:** The workflow's Load bot state step was using `secrets.GITHUB_TOKEN` to read `BOT_STATE_JSON`. `GITHUB_TOKEN` does not have Variables read permission, so `gh variable get` silently returned empty — causing the script to treat every run as a fresh pause start.
-
-**Fix applied ( 18 Mar 2026 ):**
-
-1. **Workflow permissions** — added `variables: read` to the top-level `permissions` block so `GITHUB_TOKEN` can read Variables as a fallback.
-2. **Load step token** — changed `GH_TOKEN` in the Load bot state step from `secrets.GITHUB_TOKEN` to `secrets.BOT_STATE_TOKEN || secrets.GITHUB_TOKEN`, matching the Save step.
-
-**Manual fix** — if you haven't pulled the latest commit, update `.github/workflows/daily-reminder.yml`:
-
-```yaml
-# Top-level permissions block
-permissions:
-  contents: read
-  actions: write
-  variables: read          # ← ADD THIS
-
-# Load bot state step env block
-- name: Load bot state
-  env:
-    GH_TOKEN: ${{ secrets.BOT_STATE_TOKEN || secrets.GITHUB_TOKEN }}   # ← was secrets.GITHUB_TOKEN
-```
-
-> The Save step already used `BOT_STATE_TOKEN` — only the Load step was missing it.
-
 ---
 
 ## Files
