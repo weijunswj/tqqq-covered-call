@@ -3,7 +3,6 @@ name: TQQQ Covered Call Reminder
 permissions:
   contents: read
   actions: write
-  variables: read
 
 on:
   schedule:
@@ -71,10 +70,16 @@ jobs:
           BOT_STATE_TOKEN: ${{ secrets.BOT_STATE_TOKEN }}
           FALLBACK_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          VAR_BOT_STATE_JSON: ${{ vars.BOT_STATE_JSON }}
         run: |
           set -euo pipefail
-          GH_TOKEN="${BOT_STATE_TOKEN:-$FALLBACK_TOKEN}"
-          STATE="$(GH_TOKEN="$GH_TOKEN" gh variable get BOT_STATE_JSON --repo "$REPO" 2>/dev/null || echo "")"
+          STATE="${VAR_BOT_STATE_JSON:-}"
+
+          if [ -z "$STATE" ]; then
+            GH_TOKEN="${BOT_STATE_TOKEN:-$FALLBACK_TOKEN}"
+            STATE="$(GH_TOKEN="$GH_TOKEN" gh variable get BOT_STATE_JSON --repo "$REPO" 2>/dev/null || echo "")"
+          fi
+
           if [ -n "$STATE" ]; then
             echo "$STATE" > state.json
             echo "Loaded state from GitHub Variable."
