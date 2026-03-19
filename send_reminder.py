@@ -724,6 +724,24 @@ def build_message(
 
     # Always show strike and roll guidance: even during pause, existing calls may need a roll if ITM.
     is_paused = bool(state and state.get("paused"))
+    is_close_or_sit_out = ("CLOSE" in action or "SIT OUT" in action)
+    itm_manage_note = ""
+    if is_paused and not is_close_or_sit_out:
+        if "HIGH VIX" in action:
+            itm_manage_note = "If you have an open call ITM: roll up and out — high VIX means fat premiums, use them."
+        elif "LOW VIX" in action:
+            itm_manage_note = "If you have an open call ITM: roll up and out — premiums are thin but roll cost is cheap."
+        elif "TRENDING" in action or "ADX" in action:
+            itm_manage_note = "If you have an open call ITM: roll or close — market is trending hard, do not let it ride."
+        elif "GAP" in action:
+            itm_manage_note = "If you have an open call ITM: close at open — do not roll into a gap-up day."
+        elif "EARNINGS TOMORROW" in action or ("PAUSE" in action and "EARNINGS" in action and "TOMORROW" in action):
+            itm_manage_note = "If you have an open call ITM: close if within $2 of strike. Let it ride if further OTM."
+        elif "FOMC" in action or "MACRO" in action or ("EARNINGS" in action and "SKIP" in action):
+            itm_manage_note = "If you have an open call ITM: close before the event if within $2 of strike. Let it ride if further OTM."
+        elif "CAUTION" in action:
+            itm_manage_note = "If you have an open call ITM: monitor closely. Roll if it moves further ITM."
+    itm_manage_block = f"*IF ITM TODAY:*\n  {itm_manage_note}\n\n" if itm_manage_note else ""
     entry_note = "  New entries paused today.\n\n" if is_paused else ""
     trade_sections = (
         f"*STRIKE TO USE:*  {exact_strike}  ( {strike_note} )\n"
@@ -797,6 +815,7 @@ def build_message(
         f"{reasons_block}"
         f"{close_guidance}"
         f"{pause_tracker}"
+        f"{itm_manage_block}"
         f"{trade_sections}"
         f"{div}\n"
         f"*STRATEGY (ref)*\n"
