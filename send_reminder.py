@@ -722,21 +722,20 @@ def build_message(
     elif status_change_msg:
         pause_tracker = f"*STATUS CHANGE*\n  {status_change_msg}\n\n"
 
-    # When paused, new entries and rolling are both disabled.
+    # Always show strike and roll guidance: even during pause, existing calls may need a roll if ITM.
     is_paused = bool(state and state.get("paused"))
-    trade_sections = ""
-    if not is_paused:
-        trade_sections = (
-            f"*STRIKE TO USE:*  {exact_strike}  ( {strike_note} )\n"
-            f"*DTE:* {dte_line}\n"
-            f"  Rule: {dte_note}\n"
-            f"\n"
-            f"*IF ROLLING:*\n"
-            f"  ITM → roll to {exact_strike}, same selected weekly expiry\n"
-            f"  3+ rolls already → let it ride, no more rolls\n"
-            f"  Net roll cost > original premium collected → close the call, don't roll\n"
-            f"\n"
-        )
+    entry_note = "  New entries paused today.\n\n" if is_paused else ""
+    trade_sections = (
+        f"*STRIKE TO USE:*  {exact_strike}  ( {strike_note} )\n"
+        f"*DTE:* {dte_line}\n"
+        f"  Rule: {dte_note}\n"
+        f"{entry_note}"
+        f"*IF ROLLING:*\n"
+        f"  ITM → roll to {exact_strike}, same selected weekly expiry\n"
+        f"  3+ rolls already → let it ride, no more rolls\n"
+        f"  Net roll cost > original premium collected → close the call, don't roll\n"
+        f"\n"
+    )
 
     # Existing position close guidance
     close_guidance = ""
