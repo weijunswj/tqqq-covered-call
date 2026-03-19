@@ -58,6 +58,21 @@ All core decision logic uses **confirmed daily closes** from Yahoo Finance D1 ba
 
 > 9Sig ATH DD status is displayed for context only — it does **not** drive any proceed/pause/close decisions for the covered call strategy.
 
+### Open call ITM on a PAUSE day
+
+**PAUSE only blocks new entries — it does not change how you manage an existing open call.** Roll and close rules apply as normal regardless of pause state.
+
+| Pause Reason | Action on ITM Call |
+|---|---|
+| VIX > 22 ( high vol ) | Roll up & out — high vol means fat premiums, use them. |
+| ADX > 25 ( strong trend ) | Market is trending hard against you. Roll or close — do not let it ride. |
+| VIX < 15 ( low vol ) | Premiums are thin. Roll is cheap. Roll up & out, or let expire if near DTE 0. |
+| FOMC / macro event today | Close before the event if within $2 of strike. Reassess after. |
+| Pre-market gap-up > 4% | Already ITM from the gap. Close at open — do not roll into a paused day. |
+| **VIX ≥ 40 ( CLOSE signal )** | **Close outright. Do not roll. Hard stop.** |
+
+Roll limits still apply: max 3 rolls per cycle, then let it ride to expiry.
+
 ---
 
 ## Setup
