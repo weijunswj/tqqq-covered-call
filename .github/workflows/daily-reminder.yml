@@ -5,10 +5,10 @@ permissions:
   actions: write
 
 on:
-  #schedule:
+  schedule:
     # GitHub Actions cron is UTC-only; include both DST variants.
-    #- cron: '30 12 * * 1-5'
-    #- cron: '30 13 * * 1-5'
+    - cron: '30 12 * * 1-5'
+    - cron: '30 13 * * 1-5'
   workflow_dispatch:
 
 jobs:
