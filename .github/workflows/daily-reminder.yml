@@ -42,90 +42,90 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-import os
-import re
-import sys
-from datetime import datetime, timedelta
-from pathlib import Path
-from zoneinfo import ZoneInfo
+          import os
+          import re
+          import sys
+          from datetime import datetime, timedelta
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
 
 
-def parse_cron(expr: str) -> tuple[int, int] | None:
-    parts = expr.split()
-    if len(parts) != 5:
-        return None
-    minute, hour = parts[0], parts[1]
-    if not (minute.isdigit() and hour.isdigit()):
-        return None
-    return int(minute), int(hour)
+          def parse_cron(expr: str) -> tuple[int, int] | None:
+              parts = expr.split()
+              if len(parts) != 5:
+                  return None
+              minute, hour = parts[0], parts[1]
+              if not (minute.isdigit() and hour.isdigit()):
+                  return None
+              return int(minute), int(hour)
 
 
-event_name = os.getenv("EVENT_NAME", "")
-event_schedule = (os.getenv("EVENT_SCHEDULE", "") or "").strip()
-run_window_raw = os.getenv("RUN_WINDOW_MINUTES", "")
-output_path = os.environ["GITHUB_OUTPUT"]
+          event_name = os.getenv("EVENT_NAME", "")
+          event_schedule = (os.getenv("EVENT_SCHEDULE", "") or "").strip()
+          run_window_raw = os.getenv("RUN_WINDOW_MINUTES", "")
+          output_path = os.environ["GITHUB_OUTPUT"]
 
-if not run_window_raw.isdigit() or int(run_window_raw) <= 0:
-    print(f"::error::RUN_WINDOW_MINUTES must be a positive integer. Got '{run_window_raw}'.")
-    sys.exit(1)
+          if not run_window_raw.isdigit() or int(run_window_raw) <= 0:
+              print(f"::error::RUN_WINDOW_MINUTES must be a positive integer. Got '{run_window_raw}'.")
+              sys.exit(1)
 
-run_window = int(run_window_raw)
-now_et = datetime.now(ZoneInfo("America/New_York"))
-now_utc = now_et.astimezone(ZoneInfo("UTC"))
-workflow_text = Path(".github/workflows/daily-reminder.yml").read_text(encoding="utf-8")
-cron_exprs = re.findall(r"-\s*cron:\s*'([^']+)'", workflow_text)
+          run_window = int(run_window_raw)
+          now_et = datetime.now(ZoneInfo("America/New_York"))
+          now_utc = now_et.astimezone(ZoneInfo("UTC"))
+          workflow_text = Path(".github/workflows/daily-reminder.yml").read_text(encoding="utf-8")
+          cron_exprs = re.findall(r"-\s*cron:\s*'([^']+)'", workflow_text)
 
-active_schedule = event_schedule
+          active_schedule = event_schedule
 
-if event_name == "schedule" and event_schedule:
-    parsed = [(expr, parse_cron(expr)) for expr in cron_exprs]
-    parsed = [(expr, slot) for expr, slot in parsed if slot is not None]
+          if event_name == "schedule" and event_schedule:
+              parsed = [(expr, parse_cron(expr)) for expr in cron_exprs]
+              parsed = [(expr, slot) for expr, slot in parsed if slot is not None]
 
-    if len(parsed) == 2:
-        (expr_a, (min_a, hour_a)), (expr_b, (min_b, hour_b)) = parsed
-        # Common DST pair pattern: same minute, UTC hours differ by 1.
-        if min_a == min_b and abs(hour_a - hour_b) == 1:
-            low = expr_a if hour_a < hour_b else expr_b
-            high = expr_b if hour_a < hour_b else expr_a
-            active_schedule = low if bool(now_et.dst()) else high
+              if len(parsed) == 2:
+                  (expr_a, (min_a, hour_a)), (expr_b, (min_b, hour_b)) = parsed
+                  # Common DST pair pattern: same minute, UTC hours differ by 1.
+                  if min_a == min_b and abs(hour_a - hour_b) == 1:
+                      low = expr_a if hour_a < hour_b else expr_b
+                      high = expr_b if hour_a < hour_b else expr_a
+                      active_schedule = low if bool(now_et.dst()) else high
 
-    if active_schedule != event_schedule:
-        with open(output_path, "a", encoding="utf-8") as fh:
-            fh.write("should_run=false\n")
-        print(
-            f"Skipping job: schedule '{event_schedule}' is inactive for today's ET DST state. "
-            f"Active cron slot is '{active_schedule}'."
-        )
-        sys.exit(0)
+              if active_schedule != event_schedule:
+                  with open(output_path, "a", encoding="utf-8") as fh:
+                      fh.write("should_run=false\n")
+                  print(
+                      f"Skipping job: schedule '{event_schedule}' is inactive for today's ET DST state. "
+                      f"Active cron slot is '{active_schedule}'."
+                  )
+                  sys.exit(0)
 
-target_slot = parse_cron(active_schedule)
-if target_slot is None:
-    # If schedule expression is missing/unparseable ( e.g. workflow_dispatch ), allow run.
-    with open(output_path, "a", encoding="utf-8") as fh:
-        fh.write("should_run=true\n")
-    print("Running job: non-schedule trigger or unparseable cron slot.")
-    sys.exit(0)
+          target_slot = parse_cron(active_schedule)
+          if target_slot is None:
+              # If schedule expression is missing/unparseable ( e.g. workflow_dispatch ), allow run.
+              with open(output_path, "a", encoding="utf-8") as fh:
+                  fh.write("should_run=true\n")
+              print("Running job: non-schedule trigger or unparseable cron slot.")
+              sys.exit(0)
 
-target_minute, target_hour = target_slot
-target_utc = now_utc.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
-target_et = target_utc.astimezone(ZoneInfo("America/New_York"))
+          target_minute, target_hour = target_slot
+          target_utc = now_utc.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+          target_et = target_utc.astimezone(ZoneInfo("America/New_York"))
 
-window_end = target_et + timedelta(minutes=run_window)
+          window_end = target_et + timedelta(minutes=run_window)
 
-with open(output_path, "a", encoding="utf-8") as fh:
-    if target_et <= now_et < window_end:
-        fh.write("should_run=true\n")
-        print(
-            f"Running job: current ET time is {now_et.strftime('%H:%M')} "
-            f"(active cron '{active_schedule}', window {target_et.strftime('%H:%M')}–{window_end.strftime('%H:%M')} ET)."
-        )
-    else:
-        fh.write("should_run=false\n")
-        print(
-            f"Skipping job: current ET time is {now_et.strftime('%H:%M')} "
-            f"(active cron '{active_schedule}', window {target_et.strftime('%H:%M')}–{window_end.strftime('%H:%M')} ET)."
-        )
-PY
+          with open(output_path, "a", encoding="utf-8") as fh:
+              if target_et <= now_et < window_end:
+                  fh.write("should_run=true\n")
+                  print(
+                      f"Running job: current ET time is {now_et.strftime('%H:%M')} "
+                      f"(active cron '{active_schedule}', window {target_et.strftime('%H:%M')}–{window_end.strftime('%H:%M')} ET)."
+                  )
+              else:
+                  fh.write("should_run=false\n")
+                  print(
+                      f"Skipping job: current ET time is {now_et.strftime('%H:%M')} "
+                      f"(active cron '{active_schedule}', window {target_et.strftime('%H:%M')}–{window_end.strftime('%H:%M')} ET)."
+                  )
+          PY
 
       - name: Load bot state
         if: ${{ github.event_name == 'workflow_dispatch' || steps.slot.outputs.should_run == 'true' }}
