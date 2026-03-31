@@ -769,44 +769,6 @@ def build_message(
             f"  If strike > ${hi}, let it ride.\n\n"
         )
 
-    # 9Sig status block — display only, does not affect CC decisions
-    if adx_data and "error" not in adx_data:
-        pct        = adx_data.get("current_pct_of_ath", "N/A")
-        ath_high   = adx_data.get("ath_high_315", "N/A")
-        prev_close = adx_data.get("prev_close", "N/A")
-        ath_dd_triggered = adx_data.get("ath_dd_triggered", False)
-        triggered_date = state.get("ath_dd_triggered_date") if state else None
-        resume_date_str = state.get("ath_dd_resume_date") if state else None
-
-        if ath_dd_triggered:
-            status_line = "  ATH DD:  🔴 IN ATH DD WINDOW — clock resetting daily"
-            extra_lines = []
-            if triggered_date:
-                extra_lines.append(f"  Last breach: {triggered_date}")
-            if resume_date_str:
-                extra_lines.append(f"  9Sig resume: {resume_date_str}  ( resets tomorrow if still below 70% )")
-        elif triggered_date and resume_date_str:
-            resume_date = date.fromisoformat(resume_date_str)
-            days_remaining = trading_days_remaining(datetime.now(ET).date(), resume_date)
-            status_line = "  ATH DD:  🟡 RECOVERED — counting down 126-day pause"
-            extra_lines = [
-                f"  Last breach: {triggered_date}",
-                f"  9Sig resume: {resume_date_str}  ( {days_remaining} trading days remaining )",
-            ]
-        else:
-            status_line = "  ATH DD:  🟢 NOT in ATH DD window"
-            extra_lines = []
-
-        sig9_lines = [
-            "*9SIG STATUS*",
-            status_line,
-            f"  TQQQ prev close: ${prev_close}  ( {pct}% of 315d high ${ath_high} )",
-            *extra_lines,
-        ]
-        sig9_block = "\n".join(sig9_lines) + "\n"
-    else:
-        sig9_block = "*9SIG STATUS*\n  ATH DD: data unavailable\n"
-
     div  = "─" * 35
     body = (
         f"{div}\n"
@@ -817,18 +779,6 @@ def build_message(
         f"{pause_tracker}"
         f"{itm_manage_block}"
         f"{trade_sections}"
-        f"{div}\n"
-        f"*STRATEGY (ref)*\n"
-        f"  Entry      ~6% OTM default ( ~7% at VIX 18–22 ) | closest weekly expiry | weekly\n"
-        f"  DTE rule   7 DTE default | if VIX < 16 and 7D ~6% OTM mid < $0.20, use 14 DTE\n"
-        f"  Roll       Once at open if ITM → new strike per VIX rule, same selected expiry | max 3 rolls/cycle\n"
-        f"  Close      DTE 0 at open\n"
-        f"  Proceed    VIX 15–22 | ADX <25\n"
-        f"  Pause      ADX >25 or sharp +3 rise | VIX <15 or >22 | gap-up >4% | FOMC/CPI/NFP day | earnings at/tomorrow open\n"
-        f"  Close CC   VIX ≥40\n"
-        f"  Pre-event  Close call if within $2 of strike, day before FOMC/earnings\n"
-        f"\n"
-        f"{sig9_block}"
         f"{div}"
     )
 
