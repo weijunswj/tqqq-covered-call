@@ -163,7 +163,4 @@ tqqq-covered-call/
 ├── send_reminder.py          ← Main script.
 ├── state.json                ← Auto-managed pause state.
 ├── README.md                 ← This file.
-└── skill/
-    └── references/
-        └── 9sig-rules.md     ← Full Phoenix 9Sig™ strategy rules.
 ```
