@@ -1,7 +1,7 @@
 name: TQQQ Covered Call Reminder
 
 env:
-  # Run window to tolerate GitHub schedule delays (in minutes).
+  # Run window to tolerate GitHub schedule delays ( in minutes ).
   RUN_WINDOW_MINUTES: '90'
 
 permissions:
@@ -18,6 +18,7 @@ on:
 jobs:
   send-reminder:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,8 +28,18 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Show runner info
+        run: |
+          set -euo pipefail
+          echo "Event name: ${{ github.event_name }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "Runner OS: $RUNNER_OS"
+          echo "gh version:"
+          gh --version
+
       - name: Install dependencies
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
@@ -100,7 +111,7 @@ jobs:
 
           target_slot = parse_cron(active_schedule)
           if target_slot is None:
-              # If schedule expression is missing/unparseable ( e.g. workflow_dispatch ), allow run.
+              # If schedule expression is missing / unparseable ( e.g. workflow_dispatch ), allow run.
               with open(output_path, "a", encoding="utf-8") as fh:
                   fh.write("should_run=true\n")
               print("Running job: non-schedule trigger or unparseable cron slot.")
@@ -136,18 +147,40 @@ jobs:
           VAR_BOT_STATE_JSON: ${{ vars.BOT_STATE_JSON }}
         run: |
           set -euo pipefail
-          STATE="${VAR_BOT_STATE_JSON:-}"
 
-          if [ -z "$STATE" ]; then
-            GH_TOKEN="${BOT_STATE_TOKEN:-$FALLBACK_TOKEN}"
-            STATE="$(GH_TOKEN="$GH_TOKEN" gh variable get BOT_STATE_JSON --repo "$REPO" 2>/dev/null || echo "")"
-          fi
+          STATE="${VAR_BOT_STATE_JSON:-}"
 
           if [ -n "$STATE" ]; then
             echo "$STATE" > state.json
+            echo "Loaded state from workflow variable context."
+            echo "state.json bytes: $(wc -c < state.json)"
+            exit 0
+          fi
+
+          GH_TOKEN_TO_USE="${BOT_STATE_TOKEN:-${FALLBACK_TOKEN:-}}"
+
+          if [ -z "$GH_TOKEN_TO_USE" ]; then
+            echo "::warning::No BOT_STATE_TOKEN or fallback GITHUB_TOKEN available. Starting fresh."
+            exit 0
+          fi
+
+          export GH_TOKEN="$GH_TOKEN_TO_USE"
+
+          echo "Attempting to read BOT_STATE_JSON via gh variable get..."
+          if gh variable get BOT_STATE_JSON --repo "$REPO" > state.json 2> gh-load-error.log; then
             echo "Loaded state from GitHub Variable."
+            echo "state.json bytes: $(wc -c < state.json)"
           else
-            echo "No existing state found, starting fresh."
+            LOAD_ERR="$(cat gh-load-error.log || true)"
+            if echo "$LOAD_ERR" | grep -qi "not found"; then
+              echo "No existing BOT_STATE_JSON found, starting fresh."
+              rm -f state.json
+            else
+              echo "::warning::gh variable get failed."
+              cat gh-load-error.log || true
+              echo "Starting fresh."
+              rm -f state.json
+            fi
           fi
 
       - name: Run reminder
@@ -159,6 +192,7 @@ jobs:
           VAR_TELEGRAM_TOKEN: ${{ vars.TELEGRAM_TOKEN }}
           VAR_TELEGRAM_CHAT: ${{ vars.TELEGRAM_CHAT }}
         run: |
+          set -euo pipefail
           export TELEGRAM_TOKEN="${TELEGRAM_TOKEN:-$VAR_TELEGRAM_TOKEN}"
           export TELEGRAM_CHAT="${TELEGRAM_CHAT:-$VAR_TELEGRAM_CHAT}"
           python send_reminder.py
@@ -170,14 +204,33 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+
           if [ ! -f state.json ]; then
             echo "No state.json to persist."
             exit 0
           fi
 
-          if gh variable set BOT_STATE_JSON --body "$(cat state.json)" --repo "$REPO"; then
+          STATE_BYTES="$(wc -c < state.json | tr -d '[:space:]')"
+          echo "state.json bytes: $STATE_BYTES"
+
+          # GitHub Actions configuration variable values have a 48 KB limit.
+          if [ "$STATE_BYTES" -gt 49152 ]; then
+            echo "::error::state.json is too large for a GitHub Actions variable ( ${STATE_BYTES} bytes > 49152 bytes )."
+            exit 1
+          fi
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::No GH_TOKEN available for saving BOT_STATE_JSON."
+            exit 1
+          fi
+
+          echo "Attempting to save BOT_STATE_JSON via gh variable set..."
+          if gh variable set BOT_STATE_JSON --body "$(cat state.json)" --repo "$REPO" 2> gh-save-error.log; then
             echo "State saved to GitHub Variable."
           else
-            echo "::error::Failed to persist BOT_STATE_JSON. Configure secrets.BOT_STATE_TOKEN with variable write permission ( repo administration scope ) or grant equivalent GitHub App permissions."
+            echo "::error::gh variable set failed while saving BOT_STATE_JSON."
+            echo "----- gh stderr begin -----"
+            cat gh-save-error.log || true
+            echo "----- gh stderr end -----"
             exit 1
           fi
