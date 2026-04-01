@@ -2,7 +2,7 @@ name: TQQQ Covered Call Reminder
 
 env:
   # Run window to tolerate GitHub schedule delays ( in minutes ).
-  RUN_WINDOW_MINUTES: '90'
+  RUN_WINDOW_MINUTES: '240'
 
 permissions:
   contents: read
