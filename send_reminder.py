@@ -177,9 +177,11 @@ def update_state(action: str, pause_until: str | None, tqqq: dict, vix: float | 
 
     elif is_proceed and state["paused"]:
         days = state.get("days_paused", 0)
+        previous_reason = state.get("reason", "")
         change_msg = (
-            f"✅ RESUMING today after {days} day(s) paused. "
-            f"( {state.get('reason', '')} ) — conditions now clear."
+            f"✅ Resumed after {days} day(s) paused.\n"
+            f"  Previous pause: {previous_reason}.\n"
+            f"  Conditions now clear."
         )
         state.update({
             "paused":      False,
@@ -726,8 +728,10 @@ def build_message(
     is_paused = bool(state and state.get("paused"))
     is_close_or_sit_out = ("CLOSE" in action or "SIT OUT" in action)
     itm_manage_note = ""
-    if is_paused and not is_close_or_sit_out:
-        if "HIGH VIX" in action:
+    if not is_close_or_sit_out:
+        if "✅ PROCEED" in action:
+            itm_manage_note = "If you have an open call ITM: roll to today’s selected strike/expiry. Respect max-roll and net-cost rules below."
+        elif "HIGH VIX" in action:
             itm_manage_note = "If you have an open call ITM: roll up and out — high VIX means fat premiums, use them."
         elif "LOW VIX" in action:
             itm_manage_note = "If you have an open call ITM: roll up and out — premiums are thin but roll cost is cheap."
